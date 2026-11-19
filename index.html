@@ -1,0 +1,1160 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Boss Raid Live – ฮีโร่ vs บอส</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Kanit:wght@400;600;800;900&display=swap" rel="stylesheet">
+<!--
+================================================================================
+ BOSS RAID LIVE — เกมตีบอส 2 ฝั่งสำหรับ TikTok Live (OBS Browser Source)
+--------------------------------------------------------------------------------
+ ตั้งค่า OBS: Browser Source → Local file → เลือกไฟล์นี้
+   (ถ้าต้องการให้ลงไลฟ์อัตโนมัติ: ตั้ง Page permissions = "Full access to OBS")
+   ขนาดแนะนำ 1080 x 1920 (แนวตั้ง) — หน้าจอจะย่อ/ขยายให้พอดีเองอัตโนมัติ
+   พื้นหลังโปร่งใสอยู่แล้ว (ไม่ต้องใส่ Custom CSS)
+   ติ๊ก "Control audio via OBS" ถ้าต้องการให้เสียงเข้าไลฟ์
+
+ ตั้งค่าผ่าน URL (ต่อท้ายไฟล์ด้วย ?...&...):
+   hpscale=1      คูณ HP บอสทุกตัว (เช่น 0.5 = ง่ายลงครึ่งหนึ่ง สำหรับไลฟ์คนดูน้อย)
+   timescale=1    คูณเวลาทุกรอบ          rounds=5     จำนวนรอบ (1-5)
+   next=15        พักระหว่างรอบ (วิ)    autostop=0   ปิดการสั่งหยุดสตรีมอัตโนมัติ
+   stopdelay=30   หลังขึ้นสรุปจบไลฟ์ กี่วิจึงสั่งหยุดสตรีม
+   od=30          วินาทีสุดท้ายที่เป็น Overdrive
+   grace=6        ช่วง LAST CALL หลังหมดเวลา (ชดเชยดีเลย์ไลฟ์)
+   panel=0        ซ่อนแผงทดสอบ (กด H เพื่อเปิด/ปิด)
+   legend=0       ซ่อนการ์ดอธิบายของขวัญ
+   autostart=1    ของขวัญชิ้นแรกจะเริ่มรอบอัตโนมัติ
+   vol=0.6        ระดับเสียง 0-1
+   ws=ws://localhost:8080   เชื่อม WebSocket รับ JSON ของขวัญ
+
+ API สำหรับเชื่อมระบบอ่านของขวัญ:
+   window.triggerGift(side, tier, senderName, count?, {id}?)
+     side : 'hero' | 'boss'      tier : 1 | 2 | 3 | 4 | 5
+     count: จำนวนครั้ง (เช่น Gift Streak x10)   id: กันของขวัญซ้ำ
+   window.BossRaid.start() / reset() / pause() / getState()
+   window.postMessage({type:'gift', side:'hero', tier:1, sender:'name', count:1})
+================================================================================
+-->
+<style>
+:root{--hero:#38bdf8;--hero2:#1d4ed8;--boss:#d946ef;--boss2:#7e22ce;--hp:#ef4444;--shield:#60a5fa;--heal:#4ade80;--gold:#fbbf24}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:100%;height:100%;background:transparent!important;overflow:hidden;font-family:'Kanit','Prompt','Noto Sans Thai','Segoe UI',Tahoma,sans-serif;color:#fff;user-select:none;-webkit-user-select:none}
+#stage{position:absolute;width:1080px;height:1920px;left:50%;top:50%;transform-origin:center center}
+#shake{position:absolute;inset:0}
+#shake.shake{animation:shake .65s}
+#shake.shakeS{animation:shake .35s}
+@keyframes shake{0%,100%{transform:translate(0,0)}10%{transform:translate(-24px,12px)}20%{transform:translate(20px,-16px)}30%{transform:translate(-18px,-10px)}40%{transform:translate(22px,14px)}50%{transform:translate(-12px,8px)}60%{transform:translate(10px,-12px)}70%{transform:translate(-8px,6px)}80%{transform:translate(6px,-4px)}90%{transform:translate(-3px,2px)}}
+.ol{-webkit-text-stroke:7px #000;paint-order:stroke fill}
+.ols{-webkit-text-stroke:4px #000;paint-order:stroke fill}
+.box{background:linear-gradient(180deg,rgba(22,12,48,.82),rgba(8,4,22,.82));border:3px solid rgba(255,255,255,.16);border-radius:26px;box-shadow:0 10px 30px rgba(0,0,0,.45)}
+
+/* ---------- TIMER ---------- */
+#timerBox{position:absolute;top:96px;left:50%;transform:translateX(-50%);min-width:330px;padding:6px 40px 10px;text-align:center}
+#timerLbl{font-size:30px;font-weight:600;opacity:.85;letter-spacing:1px}
+#timer{font-size:100px;font-weight:900;line-height:1;font-variant-numeric:tabular-nums}
+#timerBox.warn #timer{color:#f87171;animation:tpulse 1s infinite}
+#timerBox.od{border-color:#f43f5e;box-shadow:0 0 40px rgba(244,63,94,.8),0 10px 30px rgba(0,0,0,.45)}
+#timerBox.grace{border-color:var(--gold);box-shadow:0 0 40px rgba(251,191,36,.8)}
+#timerBox.grace #timer{color:var(--gold);animation:tpulse .5s infinite}
+@keyframes tpulse{0%,100%{transform:scale(1)}50%{transform:scale(1.08)}}
+
+/* ---------- BOSS PANEL ---------- */
+#bossPanel{position:absolute;top:262px;left:50px;width:980px;padding:16px 24px 18px}
+#bossNameRow{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:8px}
+#bossName{font-size:44px;font-weight:900;color:#f0abfc}
+#hpPct{font-size:40px;font-weight:900}
+#hpWrap{position:relative;height:74px;border-radius:38px;background:rgba(0,0,0,.65);border:4px solid rgba(255,255,255,.25);overflow:hidden}
+#hpGhost,#hpFill{position:absolute;left:0;top:0;bottom:0;border-radius:34px}
+#hpGhost{background:#fde68a;transition:width .1s linear}
+#hpFill{background:linear-gradient(180deg,#fb7185,#dc2626 55%,#7f1d1d);transition:width .18s ease-out}
+#hpFill::after{content:'';position:absolute;inset:0;background:repeating-linear-gradient(115deg,rgba(255,255,255,.14) 0 18px,transparent 18px 36px);animation:stripes 1.2s linear infinite}
+@keyframes stripes{to{background-position:72px 0}}
+#hpWrap.healflash{box-shadow:0 0 30px #4ade80;border-color:#4ade80}
+#hpText{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:42px;font-weight:900;font-variant-numeric:tabular-nums}
+#shWrap{position:relative;height:34px;margin-top:10px;border-radius:18px;background:rgba(0,0,0,.6);border:3px solid rgba(147,197,253,.35);overflow:hidden}
+#shFill{position:absolute;left:0;top:0;bottom:0;background:linear-gradient(180deg,#bfdbfe,#3b82f6 60%,#1e3a8a);transition:width .2s}
+#shText{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:800}
+#chips{display:flex;gap:12px;margin-top:12px;min-height:50px;flex-wrap:wrap}
+.chip{display:none;align-items:center;gap:6px;padding:4px 20px;border-radius:999px;font-size:30px;font-weight:800;border:3px solid rgba(255,255,255,.3)}
+.chip.on{display:inline-flex;animation:chipIn .3s}
+.chip.idle{display:inline-flex;opacity:.55;font-weight:600}
+#chipStun{background:#a16207}#chipWrath{background:#b91c1c;animation:chipIn .3s,glowR 1s infinite}#chipOD{background:linear-gradient(90deg,#e11d48,#7c3aed);animation:chipIn .3s,glowR .7s infinite}#chipShield{background:#1d4ed8}
+@keyframes chipIn{from{transform:scale(.3);opacity:0}}
+@keyframes glowR{50%{box-shadow:0 0 24px #f43f5e}}
+
+/* ---------- ARENA ---------- */
+#boss{position:absolute;left:420px;top:560px;width:600px;height:620px}
+#boss .act,#boss .idle{position:absolute;inset:0}
+#boss svg{width:100%;height:100%;overflow:visible;filter:drop-shadow(0 24px 30px rgba(0,0,0,.6))}
+#boss .idle{animation:breathe 3s ease-in-out infinite;transform-origin:50% 100%}
+@keyframes breathe{0%,100%{transform:scale(1,1)}50%{transform:scale(1.03,.97) translateY(6px)}}
+#boss.stunned .idle{animation:wobble .5s ease-in-out infinite}
+#boss.stunned svg{filter:grayscale(.65) brightness(.85) drop-shadow(0 24px 30px rgba(0,0,0,.6))}
+@keyframes wobble{0%,100%{transform:rotate(-4deg)}50%{transform:rotate(4deg)}}
+#boss.wrath .idle{animation:rage 1s ease-in-out infinite}
+#boss.wrath svg{filter:drop-shadow(0 0 30px #ef4444) saturate(1.4)}
+@keyframes rage{0%,100%{transform:scale(1.08)}50%{transform:scale(1.13) translateY(-8px)}}
+#bossAura{position:absolute;inset:-70px;border-radius:50%;background:radial-gradient(circle,rgba(239,68,68,.6),rgba(239,68,68,0) 66%);opacity:0;transition:opacity .4s}
+#boss.wrath #bossAura{opacity:1;animation:aura .8s infinite}
+@keyframes aura{50%{transform:scale(1.08)}}
+.b-hit{animation:bHit .35s}
+@keyframes bHit{0%{transform:none;filter:none}20%{transform:translate(20px,-6px);filter:brightness(2.6) saturate(0)}55%{transform:translate(-12px,4px);filter:brightness(1.4) sepia(1) hue-rotate(-50deg) saturate(5)}100%{transform:none;filter:none}}
+.b-heal{animation:bHeal .7s}
+@keyframes bHeal{0%,100%{filter:none}40%{filter:brightness(1.35) drop-shadow(0 0 40px #4ade80)}}
+.b-roar{animation:bRoar .9s}
+@keyframes bRoar{0%{transform:none}30%{transform:scale(1.18) translateY(-20px);filter:brightness(1.4) drop-shadow(0 0 60px #ef4444)}100%{transform:none}}
+#boss.dead .act{animation:bDie 2s forwards}
+@keyframes bDie{0%{transform:none;opacity:1}25%{transform:rotate(-6deg) translateY(20px);filter:brightness(3)}100%{transform:rotate(14deg) translateY(220px) scale(.7);opacity:0;filter:brightness(3) blur(8px)}}
+#shieldBubble{position:absolute;left:-40px;right:-40px;top:-10px;bottom:-40px;border-radius:50%;opacity:0;transition:opacity .35s;pointer-events:none;
+ background:radial-gradient(circle at 50% 48%,rgba(96,165,250,0) 52%,rgba(96,165,250,.28) 66%,rgba(191,219,254,.95) 70.5%,rgba(96,165,250,0) 73%)}
+#shieldBubble::before{content:'';position:absolute;inset:7%;border-radius:50%;border:7px dashed rgba(147,197,253,.75);animation:spin 9s linear infinite}
+#shieldBubble::after{content:'';position:absolute;inset:14%;border-radius:50%;background:radial-gradient(circle at 35% 30%,rgba(255,255,255,.35),rgba(255,255,255,0) 40%)}
+#shieldBubble.pop{animation:shPop .45s}
+#shieldBubble.ding{animation:shDing .22s}
+@keyframes shPop{0%{transform:scale(.6)}60%{transform:scale(1.08)}100%{transform:scale(1)}}
+@keyframes shDing{50%{transform:scale(1.04);filter:brightness(2)}}
+@keyframes spin{to{transform:rotate(360deg)}}
+#stunStars{position:absolute;left:50%;top:10px;width:300px;height:90px;transform:translateX(-50%);display:none}
+#boss.stunned #stunStars{display:block}
+#stunStars span{position:absolute;top:10px;left:50%;font-size:60px;animation:starMove 1s ease-in-out infinite alternate}
+#stunStars span:nth-child(2){animation-delay:-.33s}#stunStars span:nth-child(3){animation-delay:-.66s}
+@keyframes starMove{from{transform:translateX(-150px) translateY(10px) scale(.8)}50%{transform:translateX(-30px) translateY(-14px) scale(1.15)}to{transform:translateX(90px) translateY(10px) scale(.8)}}
+#bossTag{position:absolute;left:50%;bottom:-18px;transform:translateX(-50%);font-size:30px;font-weight:800;padding:2px 22px;border-radius:999px;background:rgba(126,34,206,.85);border:3px solid #f0abfc;white-space:nowrap}
+
+#hero{position:absolute;left:60px;top:880px;width:320px;height:390px}
+#hero .act,#hero .idle{position:absolute;inset:0}
+#hero svg{width:100%;height:100%;overflow:visible;filter:drop-shadow(0 18px 20px rgba(0,0,0,.6))}
+#hero .idle{animation:bob 2s ease-in-out infinite}
+@keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-12px)}}
+.a-atk{animation:hAtk .35s}
+@keyframes hAtk{0%{transform:none}40%{transform:translate(150px,-70px) rotate(8deg)}100%{transform:none}}
+.a-pow{animation:hPow .6s}
+@keyframes hPow{0%{transform:none;filter:none}30%{transform:translate(-20px,10px) scale(.95);filter:drop-shadow(0 0 30px #38bdf8)}60%{transform:translate(220px,-120px) rotate(12deg) scale(1.1);filter:drop-shadow(0 0 50px #38bdf8)}100%{transform:none;filter:none}}
+.a-ult{animation:hUlt 1s}
+@keyframes hUlt{0%{transform:none}25%{transform:translateY(-130px) scale(1.15);filter:drop-shadow(0 0 60px #fbbf24) brightness(1.4)}55%{transform:translate(240px,-170px) rotate(15deg) scale(1.2);filter:drop-shadow(0 0 90px #fbbf24) brightness(1.6)}100%{transform:none;filter:none}}
+#heroTag{position:absolute;left:50%;bottom:-6px;transform:translateX(-50%);font-size:30px;font-weight:800;padding:2px 22px;border-radius:999px;background:rgba(29,78,216,.88);border:3px solid #7dd3fc;white-space:nowrap}
+
+#comboBox{position:absolute;left:50px;top:1280px;width:360px;padding:8px 16px 12px}
+#comboLbl{display:flex;justify-content:space-between;font-size:24px;font-weight:800;white-space:nowrap;gap:8px}
+#comboWrap{height:22px;border-radius:12px;background:rgba(0,0,0,.6);overflow:hidden;margin-top:4px;border:2px solid rgba(255,255,255,.2)}
+#comboFill{height:100%;width:0;background:linear-gradient(90deg,#f472b6,#fbbf24);transition:width .15s}
+#comboBox.full{box-shadow:0 0 30px #f472b6}
+
+/* ---------- FEED ---------- */
+#feed{position:absolute;left:36px;top:540px;width:380px;display:flex;flex-direction:column;gap:10px}
+.fi{display:flex;align-items:center;gap:10px;padding:8px 14px;border-radius:16px;background:rgba(10,6,25,.78);border-left:8px solid var(--hero);font-size:26px;line-height:1.15;animation:fiIn .3s}
+.fi.boss{border-left-color:var(--boss)}
+.fi.late{opacity:.6;border-left-color:#888}
+.fi .ic{font-size:40px}
+.fi .nm{font-weight:800;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fi .ac{font-size:22px;opacity:.9}
+.fi .x{color:var(--gold);font-weight:900}
+.fi.bump{animation:fiBump .25s}
+@keyframes fiIn{from{transform:translateX(-60px);opacity:0}}
+@keyframes fiBump{50%{transform:scale(1.06)}}
+
+/* ---------- LIVE SCORE ---------- */
+#live{position:absolute;left:50px;top:1376px;width:980px;padding:14px 22px}
+#tugRow{display:flex;justify-content:space-between;font-size:28px;font-weight:800;margin-bottom:6px}
+#tug{height:26px;border-radius:14px;overflow:hidden;display:flex;background:#222;border:2px solid rgba(255,255,255,.25)}
+#tugH{background:linear-gradient(90deg,#1d4ed8,#38bdf8);width:50%;transition:width .4s}
+#tugB{background:linear-gradient(90deg,#d946ef,#7e22ce);flex:1}
+#tops{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:10px}
+.topcol h4{font-size:24px;font-weight:800;opacity:.85}
+.topcol.h h4{color:#7dd3fc}.topcol.b h4{color:#f0abfc}
+.topcol ol{list-style:none;font-size:24px}
+.topcol li{display:flex;justify-content:space-between;gap:8px;white-space:nowrap}
+.topcol li span:first-child{overflow:hidden;text-overflow:ellipsis}
+.topcol li b{color:var(--gold)}
+.topcol .empty{opacity:.5}
+
+/* ---------- LEGEND ---------- */
+#legend{position:absolute;left:50px;top:1640px;width:980px;display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.lg{display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:18px;background:rgba(10,6,25,.8);border:3px solid rgba(56,189,248,.6)}
+.lg.boss{border-color:rgba(217,70,239,.6)}
+.lg .gi{font-size:48px}
+.lg .gt{font-size:24px;font-weight:800;line-height:1.1}
+.lg .gd{font-size:19px;opacity:.85;line-height:1.15}
+
+/* ---------- FX ---------- */
+#fx{position:absolute;inset:0;pointer-events:none;overflow:visible}
+.float{position:absolute;transform:translate(-50%,-50%);font-weight:900;font-size:66px;white-space:nowrap;animation:floatUp 1.3s ease-out forwards;-webkit-text-stroke:7px #000;paint-order:stroke fill;font-variant-numeric:tabular-nums}
+.float.dmg{color:#fff}.float.big{color:#fde047;font-size:88px}
+.float.crit{color:#fbbf24;font-size:140px;animation-duration:1.9s}
+.float.heal{color:#4ade80}.float.bigheal{color:#4ade80;font-size:120px;animation-duration:1.8s}
+.float.shield{color:#7dd3fc;font-size:72px}.float.blocked{color:#93c5fd;font-size:50px}
+.float.stun{color:#facc15;font-size:70px}.float.combo{color:#f472b6;font-size:84px;animation-duration:1.6s}
+.float.info{color:#e5e7eb;font-size:44px}
+@keyframes floatUp{0%{opacity:0;transform:translate(-50%,-30%) scale(.4)}12%{opacity:1;transform:translate(-50%,-60%) scale(1.25)}25%{transform:translate(-50%,-70%) scale(1)}100%{opacity:0;transform:translate(calc(-50% + var(--dx,0px)),-280%) scale(.9)}}
+.slash{position:absolute;width:520px;height:520px;margin:-260px 0 0 -260px;animation:slashA .38s ease-out forwards}
+@keyframes slashA{0%{opacity:0;transform:rotate(var(--r)) scale(.4)}30%{opacity:1}100%{opacity:0;transform:rotate(calc(var(--r) + 40deg)) scale(1.15)}}
+.boom{position:absolute;border-radius:50%;animation:boomA .7s ease-out forwards;background:radial-gradient(circle,#fff 0,#fde047 20%,#f97316 42%,rgba(239,68,68,.6) 60%,rgba(239,68,68,0) 72%)}
+.boom.blue{background:radial-gradient(circle,#fff 0,#7dd3fc 25%,#2563eb 48%,rgba(37,99,235,0) 70%)}
+.boom.red{background:radial-gradient(circle,rgba(255,255,255,.0) 40%,rgba(239,68,68,.9) 55%,rgba(239,68,68,0) 70%);animation-duration:.9s}
+@keyframes boomA{0%{transform:translate(-50%,-50%) scale(.1);opacity:1}100%{transform:translate(-50%,-50%) scale(1.25);opacity:0}}
+.beam{position:absolute;height:90px;transform-origin:0 50%;border-radius:45px;background:linear-gradient(90deg,rgba(253,224,71,0),#fde047 20%,#fff 50%,#fde047 80%,rgba(253,224,71,.0));box-shadow:0 0 60px #fbbf24;animation:beamA .7s ease-out forwards}
+@keyframes beamA{0%{transform:rotate(var(--a)) scaleX(0) scaleY(.4);opacity:1}35%{transform:rotate(var(--a)) scaleX(1) scaleY(1.2);opacity:1}100%{transform:rotate(var(--a)) scaleX(1) scaleY(0);opacity:0}}
+.pt{position:absolute;font-size:54px;color:#4ade80;font-weight:900;animation:ptA 1.1s ease-out forwards;-webkit-text-stroke:4px #052e16;paint-order:stroke fill}
+@keyframes ptA{0%{opacity:0;transform:translateY(0) scale(.5)}20%{opacity:1}100%{opacity:0;transform:translateY(-260px) scale(1.1)}}
+#flash{position:absolute;inset:0;pointer-events:none;opacity:0;background:radial-gradient(circle at 65% 45%,rgba(255,255,255,.95),rgba(253,224,71,.7) 35%,rgba(251,146,60,0) 75%)}
+#flash.go{animation:flashA .6s}
+#flash.red{background:radial-gradient(circle at 65% 45%,rgba(239,68,68,.75),rgba(127,29,29,0) 75%)}
+@keyframes flashA{0%{opacity:0}15%{opacity:1}100%{opacity:0}}
+#odFrame{position:absolute;inset:0;pointer-events:none;opacity:0;transition:opacity .5s;border-radius:30px;box-shadow:inset 0 0 140px 30px rgba(244,63,94,.65)}
+#stage.overdrive #odFrame{opacity:1;animation:odP 1s infinite}
+@keyframes odP{50%{box-shadow:inset 0 0 200px 50px rgba(168,85,247,.7)}}
+
+/* ---------- BANNER / COUNTDOWN / OVERLAYS ---------- */
+#banner{position:absolute;left:0;right:0;top:760px;text-align:center;pointer-events:none;opacity:0}
+#banner.show{animation:bannerA var(--dur,2.2s) forwards}
+#bTitle{font-size:118px;font-weight:900;line-height:1.05;color:#fff}
+#bSub{font-size:46px;font-weight:800;margin-top:6px;color:#fde68a}
+#banner.hero #bTitle{color:#7dd3fc}#banner.boss #bTitle{color:#f0abfc}#banner.od #bTitle{color:#fb7185}#banner.gold #bTitle{color:var(--gold)}
+@keyframes bannerA{0%{opacity:0;transform:scale(2.2)}8%{opacity:1;transform:scale(.95)}12%{transform:scale(1.03)}16%{transform:scale(1)}85%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(.9) translateY(-40px)}}
+#cd{position:absolute;left:0;right:0;top:640px;text-align:center;font-size:360px;font-weight:900;pointer-events:none;color:var(--gold);display:none}
+#cd.on{display:block}
+#cd.tick{animation:cdA .9s}
+@keyframes cdA{0%{transform:scale(2);opacity:0}20%{transform:scale(1);opacity:1}100%{transform:scale(.8);opacity:.2}}
+#idleBox{position:absolute;left:140px;width:800px;top:1180px;padding:20px 30px;text-align:center;display:none}
+#idleBox.on{display:block;animation:chipIn .4s}
+#idleBox h2{font-size:56px;font-weight:900;color:var(--gold)}
+#idleBox p{font-size:30px;opacity:.9}
+#idleBuf{color:#86efac;font-weight:800}
+#result{position:absolute;inset:0;display:none;align-items:flex-start;justify-content:center;background:rgba(0,0,0,.55)}
+#result.on{display:flex;animation:fadeIn .5s}
+@keyframes fadeIn{from{opacity:0}}
+#resCard{margin-top:250px;width:960px;padding:34px 40px 40px;text-align:center}
+#resCard.hero{border-color:#38bdf8;box-shadow:0 0 70px rgba(56,189,248,.6)}
+#resCard.boss{border-color:#d946ef;box-shadow:0 0 70px rgba(217,70,239,.6)}
+#resTitle{font-size:96px;font-weight:900;line-height:1.05}
+#resCard.hero #resTitle{color:#7dd3fc}#resCard.boss #resTitle{color:#f0abfc}
+#resReason{font-size:36px;margin-top:8px;color:#fde68a;font-weight:600}
+#resStats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:24px 0}
+.st{background:rgba(255,255,255,.07);border-radius:16px;padding:10px}
+.st b{display:block;font-size:40px;font-weight:900}
+.st span{font-size:22px;opacity:.8}
+#resTops{display:grid;grid-template-columns:1fr 1fr;gap:24px;text-align:left}
+.rt h3{font-size:34px;font-weight:900;margin-bottom:8px}
+.rt.h h3{color:#7dd3fc}.rt.b h3{color:#f0abfc}
+.rt ol{list-style:none}
+.rt li{display:flex;justify-content:space-between;gap:10px;font-size:30px;padding:6px 12px;border-radius:12px;margin-bottom:6px;background:rgba(255,255,255,.06);white-space:nowrap}
+.rt li span{overflow:hidden;text-overflow:ellipsis}
+.rt li:first-child{background:rgba(251,191,36,.18);border:2px solid rgba(251,191,36,.6);font-weight:800}
+.rt li b{color:var(--gold)}
+.rt .empty{opacity:.5;font-size:26px}
+#resBtn{margin-top:30px;font:inherit;font-size:44px;font-weight:900;color:#111;padding:14px 60px;border:none;border-radius:999px;background:linear-gradient(180deg,#fde047,#f59e0b);cursor:pointer;box-shadow:0 8px 0 #92400e}
+#resBtn:active{transform:translateY(4px);box-shadow:0 4px 0 #92400e}
+#resAuto{font-size:26px;margin-top:12px;opacity:.85}
+
+/* ---------- TEST PANEL (outside stage) ---------- */
+#panel{position:fixed;right:10px;bottom:10px;width:320px;z-index:9999;font:13px/1.3 'Kanit','Segoe UI',sans-serif;background:rgba(12,10,24,.94);border:1px solid #444;border-radius:12px;color:#eee;box-shadow:0 6px 24px rgba(0,0,0,.6)}
+#panel.hidden{display:none}
+#panel .ph{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;cursor:pointer;font-weight:600;font-size:14px}
+#panel.collapsed .pb{display:none}
+#panel .pb{padding:0 12px 12px;display:flex;flex-direction:column;gap:8px}
+#panel .row{display:flex;gap:6px;flex-wrap:wrap}
+#panel button{font:inherit;cursor:pointer;border:1px solid #555;background:#2a2640;color:#fff;border-radius:8px;padding:6px 8px;flex:1}
+#panel button:hover{filter:brightness(1.3)}
+#panel .grp{border-radius:10px;padding:8px;display:flex;flex-direction:column;gap:5px}
+#panel .grp.h{background:rgba(29,78,216,.25);border:1px solid #1d4ed8}
+#panel .grp.b{background:rgba(126,34,206,.25);border:1px solid #7e22ce}
+#panel .grp .gt{font-weight:600}
+#panel .grp button{text-align:left}
+#panel input[type=text],#panel select{font:inherit;background:#1b1830;color:#fff;border:1px solid #555;border-radius:8px;padding:5px 8px}
+#panel input[type=text]{flex:1;min-width:0}
+#panel label{display:flex;align-items:center;gap:6px;cursor:pointer}
+#panel .hint{font-size:11px;opacity:.6}
+#panel #pStat{font-size:12px;opacity:.8}
+
+/* chibi expressions */
+#boss .eh,#boss .es,#boss .ed,#hero .ea{display:none}
+#boss.stunned .en{display:none}#boss.stunned .es{display:inline}
+#boss .b-hit .en,#boss .b-hit .es{display:none}#boss .b-hit .eh{display:inline}
+#boss.dead .en,#boss.dead .es,#boss.dead .eh{display:none}#boss.dead .ed{display:inline}
+#hero .a-atk .en,#hero .a-pow .en,#hero .a-ult .en{display:none}
+#hero .a-atk .ea,#hero .a-pow .ea,#hero .a-ult .ea{display:inline}
+#boss svg,#hero svg{filter:drop-shadow(0 14px 0 rgba(0,0,0,.18)) drop-shadow(0 18px 24px rgba(0,0,0,.35))!important}
+#boss.stunned svg{filter:saturate(.6) drop-shadow(0 18px 24px rgba(0,0,0,.35))!important}
+#boss.wrath svg{filter:drop-shadow(0 0 26px #ff6b8b) drop-shadow(0 18px 24px rgba(0,0,0,.35))!important}
+#bossTag{background:#a98be8;border-color:#fff4e6;color:#fff}
+#heroTag{background:#5bb8f0;border-color:#fff4e6;color:#fff}
+#bossTag,#heroTag{border-width:4px;box-shadow:0 0 0 4px #8a5a3b}
+.idle{transform-origin:50% 100%}
+#hero .idle{animation:bobCute 1.6s ease-in-out infinite}
+@keyframes bobCute{0%,100%{transform:translateY(0) scale(1,1)}50%{transform:translateY(-10px) scale(.98,1.02)}}
+
+#roundBox{position:absolute;top:110px;left:50px;width:300px;padding:10px 20px;text-align:center}
+#roundNum{font-size:46px;font-weight:900;color:var(--gold);line-height:1.1}
+#roundSub{font-size:24px;font-weight:600;opacity:.9}
+#pipsBox{position:absolute;top:110px;right:50px;width:300px;padding:14px 12px}
+#pips{display:flex;justify-content:space-between}
+.pip{width:50px;height:50px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:28px;background:rgba(255,255,255,.08);border:3px solid rgba(255,255,255,.2);position:relative;filter:grayscale(.8);opacity:.6}
+.pip.cur{filter:none;opacity:1;border-color:var(--gold);box-shadow:0 0 16px var(--gold);animation:tpulse 1.2s infinite}
+.pip.hero,.pip.boss{filter:none;opacity:1}
+.pip.hero{border-color:#38bdf8;background:rgba(56,189,248,.3)}.pip.boss{border-color:#d946ef;background:rgba(217,70,239,.3)}
+.pip.hero::after,.pip.boss::after{position:absolute;right:-8px;bottom:-8px;font-size:20px}
+.pip.hero::after{content:'⚔️'}.pip.boss::after{content:'😈'}
+#chipPassive{background:rgba(255,255,255,.12);font-size:24px;font-weight:600}
+#finale{position:absolute;inset:0;display:none;align-items:flex-start;justify-content:center;background:rgba(0,0,0,.6)}
+#finale.on{display:flex;animation:fadeIn .6s}
+#finCard{margin-top:160px;width:980px;padding:30px 40px 36px;text-align:center;border-color:var(--gold);box-shadow:0 0 80px rgba(251,191,36,.55)}
+#finTop{font-size:44px;font-weight:800;color:#fde68a}
+#finTitle{font-size:90px;font-weight:900;line-height:1.1;color:var(--gold)}
+#finScore{font-size:80px;font-weight:900;margin:6px 0 14px}
+#finRounds{display:flex;flex-direction:column;gap:8px;margin-bottom:20px}
+.fr{display:flex;justify-content:space-between;font-size:30px;padding:8px 18px;border-radius:14px;background:rgba(255,255,255,.07)}
+.fr.hero{border-left:8px solid #38bdf8}.fr.boss{border-left:8px solid #d946ef}
+#resTops2{display:grid;grid-template-columns:1fr 1fr;gap:24px;text-align:left}
+#finThanks{font-size:38px;font-weight:800;margin-top:22px;color:#fbcfe8}
+#finStop{font-size:28px;margin-top:12px;color:#fde68a;min-height:36px}
+#finBtns{display:flex;gap:16px;justify-content:center;margin-top:16px}
+#finBtns button{font:inherit;font-size:28px;font-weight:800;padding:10px 26px;border-radius:999px;border:3px solid rgba(255,255,255,.3);background:rgba(255,255,255,.12);color:#fff;cursor:pointer}
+
+#legend{top:1596px!important;grid-template-columns:1fr 1fr!important;grid-template-rows:repeat(5,auto);grid-auto-flow:column;gap:6px 10px!important}
+.lg{padding:1px 10px!important;border-width:2px!important;border-radius:14px!important;gap:8px!important}
+.lg .gi{font-size:30px!important}
+.lg .gx{min-width:0}
+.lg .gt{line-height:1.15!important;font-size:20px!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lg .gt b{color:var(--gold)}
+.lg .gd{line-height:1.1!important;font-size:15px!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#live{top:1360px!important;padding:10px 22px!important}
+#tops li:nth-child(3){display:none}
+</style>
+</head>
+<body>
+<div id="stage">
+ <div id="shake">
+  <div id="timerBox" class="box"><div id="timerLbl">เวลาที่เหลือ</div><div id="timer" class="ol">2:00</div></div>
+
+  <div id="roundBox" class="box"><div id="roundNum" class="ols">ROUND 1/5</div><div id="roundSub">Lv.1</div></div>
+  <div id="pipsBox" class="box"><div id="pips"></div></div>
+
+  <div id="bossPanel" class="box">
+   <div id="bossNameRow"><div id="bossName" class="ols">😈 จอมมาร</div><div id="hpPct" class="ols">100%</div></div>
+   <div id="hpWrap"><div id="hpGhost"></div><div id="hpFill"></div><div id="hpText" class="ols">5,000 / 5,000</div></div>
+   <div id="shWrap"><div id="shFill"></div><div id="shText" class="ols">🛡 โล่ 0</div></div>
+   <div id="chips">
+    <div class="chip" id="chipShield">🛡 โล่ <span></span></div>
+    <div class="chip" id="chipStun">💫 สตั๊น <span></span></div>
+    <div class="chip" id="chipWrath">😡 WRATH x1.5 <span></span></div>
+    <div class="chip" id="chipOD">🔥 OVERDRIVE x2</div>
+    <div class="chip on" id="chipPassive">🧬 <span>ไม่มีพาสซีฟ</span></div>
+   </div>
+  </div>
+
+  <div id="feed"></div>
+
+  <div id="boss">
+   <div id="bossAura"></div>
+   <div class="act" id="bossAct"><div class="idle" id="bossSvg"></div></div>
+   <div id="shieldBubble"></div>
+   <div id="stunStars"><span>⭐</span><span>💫</span><span>⭐</span></div>
+   <div id="bossTag">😈 ทีมบอส</div>
+  </div>
+
+  <div id="hero">
+   <div class="act" id="heroAct"><div class="idle">
+    <svg viewBox="0 0 260 320" aria-label="hero">
+     <g stroke="#8a5a3b" stroke-width="6" stroke-linejoin="round" stroke-linecap="round">
+      <path d="M74 196 Q50 258 54 310 L206 310 Q210 258 186 196Z" fill="#8fd0f7"/>
+      <ellipse cx="106" cy="306" rx="20" ry="11" fill="#9a6a45"/>
+      <ellipse cx="154" cy="306" rx="20" ry="11" fill="#9a6a45"/>
+      <path d="M88 200 Q80 292 94 300 L166 300 Q180 292 172 200Z" fill="#eef4fb"/>
+      <path d="M88 252 L172 252" stroke-width="5"/>
+      <path d="M118 200 L130 222 L142 200Z" fill="#ffe28a"/>
+      <g class="sw">
+       <path d="M198 218 L238 104 L252 110 L214 224Z" fill="#e3f4ff"/>
+       <path d="M238 104 L250 84 L252 110Z" fill="#e3f4ff"/>
+       <path d="M186 214 L226 228" stroke-width="12" stroke="#8a5a3b"/>
+       <path d="M186 214 L226 228" stroke-width="5" stroke="#ffd34d"/>
+       <circle cx="198" cy="236" r="15" fill="#fff4e6"/>
+      </g>
+      <circle cx="66" cy="242" r="38" fill="#8fd0f7"/>
+      <path d="M66 220 L72 236 L88 236 L75 246 L80 262 L66 252 L52 262 L57 246 L44 236 L60 236Z" fill="#ffe28a" stroke-width="4"/>
+      <path d="M128 44 Q146 0 190 10 Q164 26 152 50Z" fill="#ff9aa8"/>
+      <ellipse cx="130" cy="128" rx="94" ry="84" fill="#fff4e6"/>
+      <ellipse cx="38" cy="140" rx="12" ry="16" fill="#fff4e6"/>
+      <path d="M38 136 Q32 52 130 44 Q228 52 222 136 Q208 104 188 112 Q178 82 156 104 Q140 78 124 104 Q104 80 94 110 Q66 98 38 136Z" fill="#6b4226"/>
+      <path d="M48 108 Q130 66 212 108 L208 122 Q130 82 52 122Z" fill="#cfe6fb"/>
+      <circle cx="130" cy="88" r="9" fill="#8fd0f7" stroke-width="4"/>
+     </g>
+     <ellipse cx="78" cy="168" rx="17" ry="10" fill="#ffb3c6" opacity=".85"/>
+     <ellipse cx="182" cy="168" rx="17" ry="10" fill="#ffb3c6" opacity=".85"/>
+     <g class="en">
+      <ellipse cx="100" cy="146" rx="10" ry="13" fill="#3b2416"/><ellipse cx="160" cy="146" rx="10" ry="13" fill="#3b2416"/>
+      <circle cx="104" cy="141" r="4" fill="#fff"/><circle cx="164" cy="141" r="4" fill="#fff"/>
+      <path d="M122 174 Q130 182 138 174" stroke="#8a5a3b" stroke-width="5" fill="none" stroke-linecap="round"/>
+     </g>
+     <g class="ea" stroke="#3b2416" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" fill="none">
+      <path d="M88 138 L110 148 L88 158"/><path d="M172 138 L150 148 L172 158"/>
+      <path d="M118 172 Q130 188 142 172Z" fill="#ff8fab" stroke="#8a5a3b" stroke-width="5"/>
+     </g>
+    </svg>
+   </div></div>
+   <div id="heroTag">⚔️ ทีมฮีโร่</div>
+  </div>
+
+  <div id="comboBox" class="box">
+   <div id="comboLbl"><span>⚡ COMBO</span><span id="comboTxt">0% · +0%</span></div>
+   <div id="comboWrap"><div id="comboFill"></div></div>
+  </div>
+
+  <div id="live" class="box">
+   <div id="tugRow"><span style="color:#7dd3fc">⚔️ ดาเมจ <span id="totH">0</span></span><span style="color:#f0abfc">ฮีล+โล่ <span id="totB">0</span> 🛡️</span></div>
+   <div id="tug"><div id="tugH"></div><div id="tugB"></div></div>
+   <div id="tops">
+    <div class="topcol h"><h4>⚔️ Top ฮีโร่</h4><ol id="topH"></ol></div>
+    <div class="topcol b"><h4>😈 Top ฝั่งบอส</h4><ol id="topB"></ol></div>
+   </div>
+  </div>
+
+  <div id="legend"></div>
+  <div id="fx"></div>
+ </div>
+
+ <div id="odFrame"></div>
+ <div id="flash"></div>
+ <div id="banner"><div id="bTitle" class="ol"></div><div id="bSub" class="ols"></div></div>
+ <div id="cd" class="ol">3</div>
+ <div id="idleBox" class="box"><h2 class="ols">⚔️ BOSS RAID ⚔️</h2><p>รอบใหม่กำลังจะเริ่ม — ส่งของขวัญเลือกฝั่งได้เลย!</p><p id="idleBuf"></p></div>
+
+ <div id="result">
+  <div id="resCard" class="box">
+   <div id="resTitle" class="ol">ฝั่งฮีโร่ชนะ!</div>
+   <div id="resReason"></div>
+   <div id="resStats"></div>
+   <div id="resTops">
+    <div class="rt h"><h3>⚔️ Top ฝั่งฮีโร่</h3><ol id="resTopH"></ol></div>
+    <div class="rt b"><h3>😈 Top ฝั่งบอส</h3><ol id="resTopB"></ol></div>
+   </div>
+   <button id="resBtn">🔄 เริ่มรอบใหม่</button>
+   <div id="resAuto"></div>
+  </div>
+ </div>
+ <div id="finale">
+  <div id="finCard" class="box">
+   <div id="finTop" class="ols">🎉 จบไลฟ์วันนี้แล้ว! 🎉</div>
+   <div id="finTitle" class="ol">ทีมฮีโร่ครองไลฟ์!</div>
+   <div id="finScore" class="ol">⚔️ 3 : 2 😈</div>
+   <div id="finRounds"></div>
+   <div id="resTops2">
+    <div class="rt h"><h3>⚔️ MVP ฝั่งฮีโร่ (รวม 5 รอบ)</h3><ol id="finTopH"></ol></div>
+    <div class="rt b"><h3>😈 MVP ฝั่งบอส (รวม 5 รอบ)</h3><ol id="finTopB"></ol></div>
+   </div>
+   <div id="finThanks" class="ols">ขอบคุณทุกคนที่มาร่วมสนุก แล้วเจอกันไลฟ์หน้านะ 💖</div>
+   <div id="finStop"></div>
+   <div id="finBtns"><button id="finCancel">✋ ยกเลิกลงไลฟ์อัตโนมัติ</button><button id="finRestart">⟲ เริ่มใหม่ทั้งหมด</button></div>
+  </div>
+ </div>
+</div>
+
+<div id="panel">
+ <div class="ph" id="pHead"><span>🎮 แผงทดสอบของขวัญ</span><span id="pArrow">▾</span></div>
+ <div class="pb">
+  <div class="row"><button data-act="start">▶ เริ่ม</button><button data-act="pause">⏸ พัก</button><button data-act="skip">⏩ -30วิ</button><button data-act="reset">↺ รีเซ็ตรอบ</button></div>
+  <div class="row"><button data-act="next">⏭ รอบถัดไป</button><button data-act="all">⟲ เริ่มใหม่ทั้ง 5 รอบ</button></div>
+  <div class="row"><input type="text" id="pName" placeholder="ชื่อผู้ส่ง (ว่าง = สุ่ม)"><select id="pCount"><option>1</option><option>5</option><option>10</option><option>50</option></select></div>
+  <div class="grp h"><div class="gt">⚔️ ฝั่งฮีโร่ (โจมตีบอส)</div><div id="pHero" style="display:flex;flex-direction:column;gap:5px"></div></div>
+  <div class="grp b"><div class="gt">😈 ฝั่งบอส (ปกป้อง/บัฟ)</div><div id="pBoss" style="display:flex;flex-direction:column;gap:5px"></div></div>
+  <label><input type="checkbox" id="pDelay"> จำลองดีเลย์ไลฟ์ 3–8 วินาที</label>
+  <label><input type="checkbox" id="pAuto"> สุ่มของขวัญอัตโนมัติ (ทดสอบโหลด)</label>
+  <label>🔊 <input type="range" id="pVol" min="0" max="1" step="0.05" style="flex:1"></label>
+  <div id="pStat"></div>
+  <div class="hint">คีย์ลัด: 1-5 ฮีโร่ · 6-0 บอส · Space เริ่ม/รอบถัดไป · P พัก · R รีเซ็ตรอบ · C ยกเลิกลงไลฟ์ · H ซ่อนแผง</div>
+ </div>
+</div>
+
+<script>
+(function(){
+'use strict';
+/* =========================== CONFIG =========================== */
+const qs=new URLSearchParams(location.search);
+const num=(k,d)=>{const v=parseFloat(qs.get(k));return isFinite(v)?v:d};
+const bool=(k,d)=>qs.has(k)?!['0','false','no','off'].includes(String(qs.get(k)).toLowerCase()):d;
+
+const CONFIG={
+  rounds: Math.min(5,Math.max(1,Math.floor(num('rounds',5)))),
+  hpScale: Math.max(.1,num('hpscale',1)),
+  timeScale: Math.max(.1,num('timescale',1)),
+  overdriveTime: Math.max(0,num('od',30)),
+  overdriveMult: 2,
+  graceTime: Math.max(0,num('grace',6)),     // LAST CALL ชดเชยดีเลย์ไลฟ์
+  countdown: 3,
+  maxShield: 2000,
+  shieldDuration: 15,
+  stunDuration: 5, stunVuln: 1.2, stunHealPenalty: 0.5,
+  wrathDuration: 20, wrathMult: 1.5,
+  combo:{perHit:10,max:100,burstDmg:200,maxBonus:.5,idleDelay:6,decayPerSec:6},
+  autoStart: bool('autostart',false),
+  nextDelay: Math.max(0,num('next',15)),     // พักระหว่างรอบ แล้วไปรอบถัดไปเอง
+  finaleDelay: 10,                           // หลังรอบสุดท้าย กี่วิจึงขึ้นสรุปจบไลฟ์
+  autoStop: bool('autostop',true),           // สั่ง OBS หยุดสตรีม (ต้องให้สิทธิ์ Full access)
+  stopDelay: Math.max(5,num('stopdelay',30)),
+  showPanel: bool('panel',true),
+  showLegend: bool('legend',true),
+  volume: Math.min(1,Math.max(0,num('vol',0.6))),
+  // ต่อตัวเชื่อมของขวัญอัตโนมัติ: เปิดผ่าน bridge → host เดียวกัน, เปิดจากเว็บ (GitHub Pages) → bridge บนเครื่องนี้ (ws=0 เพื่อปิด)
+  wsUrl: qs.get('ws')==='0'?'':(qs.get('ws')||(/^(localhost|127\.0\.0\.1)$/.test(location.hostname)&&location.port?'ws://'+location.host:'ws://127.0.0.1:21213')),
+  // ของขวัญราคาถูก 5 ระดับ/ฝั่ง (coin = ราคาเหรียญ TikTok โดยประมาณ — แก้ชื่อ/ราคาให้ตรงกับในแอปได้)
+  // พลังถูกตั้งให้ใกล้เคียงกัน ~20 ต่อ 1 เหรียญ ทั้งสองฝั่งจึงยุติธรรม
+  gifts:{
+    hero:{
+      1:{key:'slash',  name:'Slash',          th:'กุหลาบ',       icon:'🌹', coin:1,   value:20,   desc:'ฟัน + คอมโบ'},
+      2:{key:'double', name:'Double Slash',   th:'Finger Heart', icon:'🫰', coin:5,   value:55,   desc:'ฟัน 2 ครั้ง + คอมโบ x2'},
+      3:{key:'power',  name:'Power Skill',    th:'Rosa',         icon:'💐', coin:10,  value:220,  desc:'ดาเมจแรง + สตั๊น 5 วิ'},
+      4:{key:'thunder',name:'Thunder Break',  th:'โดนัท',        icon:'🍩', coin:30,  value:650,  desc:'ทำลายโล่ทั้งหมด + ดาเมจ'},
+      5:{key:'ult',    name:'Ultimate',       th:'Hand Hearts',  icon:'🫶', coin:100, value:2200, desc:'ท่าไม้ตาย ทะลุโล่ + สตั๊น'}
+    },
+    boss:{
+      1:{key:'heal',   name:'Dark Heal',      th:'ไอศกรีม',      icon:'🍦', coin:1,   value:25,   desc:'ฟื้นฟู HP เล็กน้อย'},
+      2:{key:'mend',   name:'Dark Mend',      th:'Lollipop',     icon:'🍭', coin:5,   value:110,  desc:'ฮีล + ล้างสตั๊น'},
+      3:{key:'shield', name:'Iron Shield',    th:'น้ำหอม',       icon:'🧴', coin:20,  value:450,  desc:'โล่รับดาเมจแทน HP'},
+      4:{key:'fort',   name:'Fortress',       th:'เค้ก',         icon:'🍰', coin:30,  value:350,  desc:'โล่ + ฮีล พร้อมกัน'},
+      5:{key:'wrath',  name:'Boss Wrath',     th:'Confetti',     icon:'🎊', coin:100, value:1800, desc:'ฮีลก้อนใหญ่ + บัฟ x1.5'}
+    }
+  }
+};
+
+/* =========================== BOSS ROSTER (chibi SVG) =========================== */
+const O='#8a5a3b';
+function face(ey,d,o={}){
+  const L=200-d,R=200+d,my=ey+46,by=ey+32;
+  const brows=o.angry?`<path d="M${L-28} ${ey-34} L${L+16} ${ey-22} M${R+28} ${ey-34} L${R-16} ${ey-22}" stroke="${O}" stroke-width="8" stroke-linecap="round"/>`:'';
+  const mouth=o.fang
+    ?`<path d="M182 ${my} Q191 ${my+10} 200 ${my} Q209 ${my+10} 218 ${my}" stroke="${O}" stroke-width="6" fill="none" stroke-linecap="round"/><path d="M187 ${my+4} L191 ${my+16} L196 ${my+6}Z" fill="#fff" stroke="${O}" stroke-width="3" stroke-linejoin="round"/>`
+    :`<path d="M186 ${my} Q200 ${my+14} 214 ${my}" stroke="${O}" stroke-width="6" fill="none" stroke-linecap="round"/>`;
+  const spiral=x=>`<path d="M${x} ${ey} a5 5 0 1 1 6 -4 a10 10 0 1 1 -16 8 a15 15 0 1 1 26 -10"/>`;
+  const X=x=>`<path d="M${x-14} ${ey-14} L${x+14} ${ey+14} M${x+14} ${ey-14} L${x-14} ${ey+14}"/>`;
+  return `<ellipse cx="${L-30}" cy="${by}" rx="24" ry="13" fill="#ffb3c6" opacity=".85"/><ellipse cx="${R+30}" cy="${by}" rx="24" ry="13" fill="#ffb3c6" opacity=".85"/>
+  <g class="en">${brows}<ellipse cx="${L}" cy="${ey}" rx="14" ry="18" fill="#3b2416"/><ellipse cx="${R}" cy="${ey}" rx="14" ry="18" fill="#3b2416"/><circle cx="${L+5}" cy="${ey-7}" r="5" fill="#fff"/><circle cx="${R+5}" cy="${ey-7}" r="5" fill="#fff"/>${mouth}</g>
+  <g class="eh" stroke="#3b2416" stroke-width="9" stroke-linecap="round" stroke-linejoin="round" fill="none"><path d="M${L-16} ${ey-16} L${L+10} ${ey} L${L-16} ${ey+16}"/><path d="M${R+16} ${ey-16} L${R-10} ${ey} L${R+16} ${ey+16}"/><ellipse cx="200" cy="${my+8}" rx="14" ry="10" fill="#3b2416"/></g>
+  <g class="es" stroke="#3b2416" stroke-width="5" fill="none" stroke-linecap="round">${spiral(L)}${spiral(R)}<path d="M182 ${my+4} Q188 ${my-4} 194 ${my+4} Q200 ${my+12} 206 ${my+4} Q212 ${my-4} 218 ${my+4}" stroke="${O}"/></g>
+  <g class="ed" stroke="#3b2416" stroke-width="8" stroke-linecap="round" fill="none">${X(L)}${X(R)}<path d="M184 ${my+6} Q200 ${my-4} 216 ${my+6}" stroke="${O}"/></g>`;
+}
+const svgWrap=(body,f)=>`<svg viewBox="0 0 400 420"><g stroke="${O}" stroke-width="7" stroke-linejoin="round" stroke-linecap="round">${body}</g>${f}</svg>`;
+
+const BOSSES=[
+ {name:'สไลม์จอมซน',icon:'💧',color:'#6cc66a',hp:1500,time:90,armor:0,regen:0,startShield:0,healMult:1,enrageAt:0,
+  svg:svgWrap(`
+   <path d="M200 70 Q228 70 236 98 Q300 120 330 220 Q372 320 340 392 Q200 420 60 392 Q28 320 70 220 Q100 120 164 98 Q172 70 200 70Z" fill="#b8eeb0"/>
+   <path d="M200 72 Q188 38 212 28 Q236 26 238 52 Q220 48 212 66Z" fill="#8fd88a"/>
+   <path d="M306 384 Q312 412 324 386" fill="#b8eeb0"/>
+   <ellipse cx="130" cy="180" rx="18" ry="34" fill="#fff" opacity=".65" stroke="none" transform="rotate(25 130 180)"/>`,face(272,52))},
+ {name:'ก็อบลินหมวกเหล็ก',icon:'👺',color:'#7fb34f',hp:2500,time:100,armor:0,regen:0,startShield:300,healMult:1,enrageAt:0,
+  svg:svgWrap(`
+   <path d="M130 300 Q104 360 98 410 L302 410 Q296 360 270 300Z" fill="#c99a6b"/>
+   <path d="M112 368 L288 368" stroke-width="10"/><rect x="186" y="354" width="28" height="26" rx="6" fill="#ffd34d" stroke-width="5"/>
+   <path d="M298 384 L338 252 Q350 222 372 236 Q384 260 356 282 L318 392Z" fill="#d9a877"/>
+   <circle cx="102" cy="362" r="24" fill="#c5e6a3"/><circle cx="302" cy="376" r="24" fill="#c5e6a3"/>
+   <path d="M84 214 Q12 176 18 140 Q62 160 100 176Z" fill="#c5e6a3"/><path d="M316 214 Q388 176 382 140 Q338 160 300 176Z" fill="#c5e6a3"/>
+   <ellipse cx="200" cy="218" rx="130" ry="112" fill="#c5e6a3"/>
+   <path d="M76 186 Q76 70 200 66 Q324 70 324 186 Q200 156 76 186Z" fill="#dfe4ea"/>
+   <path d="M188 70 L200 34 L212 70Z" fill="#b5bec9"/>
+   <circle cx="122" cy="134" r="7" fill="#b5bec9" stroke-width="3"/><circle cx="200" cy="106" r="7" fill="#b5bec9" stroke-width="3"/><circle cx="278" cy="134" r="7" fill="#b5bec9" stroke-width="3"/>`,face(240,46,{angry:true,fang:true}))},
+ {name:'ผีน้อยจอมป่วน',icon:'👻',color:'#9b7fd9',hp:3500,time:110,armor:.1,regen:4,startShield:0,healMult:1.1,enrageAt:0,
+  svg:svgWrap(`
+   <circle cx="56" cy="130" r="12" fill="#e6e0ff"/><circle cx="350" cy="160" r="9" fill="#e6e0ff"/>
+   <path d="M84 262 Q40 270 46 306 Q72 302 88 286Z" fill="#f4f1ff"/><path d="M316 262 Q360 270 354 306 Q328 302 312 286Z" fill="#f4f1ff"/>
+   <path d="M80 398 L80 212 Q80 80 200 80 Q320 80 320 212 L320 398 Q290 370 260 398 Q230 370 200 398 Q170 370 140 398 Q110 370 80 398Z" fill="#f4f1ff"/>
+   <ellipse cx="200" cy="104" rx="104" ry="18" fill="#9b7fd9"/>
+   <path d="M148 100 Q168 40 240 6 Q226 58 252 100Z" fill="#9b7fd9"/>
+   <path d="M152 88 Q200 78 248 88 L250 100 Q200 92 150 100Z" fill="#ffd34d" stroke-width="5"/>`,face(222,50,{fang:true}))},
+ {name:'มังกรน้อยเปลวไฟ',icon:'🐲',color:'#ff8a65',hp:5000,time:120,armor:.1,regen:6,startShield:400,healMult:1.2,enrageAt:0,
+  svg:svgWrap(`
+   <path d="M286 372 Q366 384 370 312 Q352 352 290 342Z" fill="#ffb38a"/>
+   <path d="M368 316 Q352 276 376 258 Q376 282 392 290 Q392 316 368 316Z" fill="#ffd34d"/>
+   <path d="M108 252 Q28 232 24 162 Q58 178 72 152 Q90 192 118 188Z" fill="#ff9d94"/><path d="M292 252 Q372 232 376 162 Q342 178 328 152 Q310 192 282 188Z" fill="#ff9d94"/>
+   <path d="M130 292 Q100 352 104 410 L296 410 Q300 352 270 292Z" fill="#ffb38a"/>
+   <path d="M160 300 Q150 360 160 406 L240 406 Q250 360 240 300Z" fill="#fff1c9"/>
+   <path d="M158 342 L242 342 M158 374 L242 374" stroke-width="4"/>
+   <circle cx="116" cy="346" r="24" fill="#ffb38a"/><circle cx="284" cy="346" r="24" fill="#ffb38a"/>
+   <path d="M136 96 L158 54 L180 88 L200 40 L220 88 L242 54 L264 96Z" fill="#ff9d94"/>
+   <path d="M108 124 Q84 72 104 44 Q124 84 142 102Z" fill="#fff1c9"/><path d="M292 124 Q316 72 296 44 Q276 84 258 102Z" fill="#fff1c9"/>
+   <ellipse cx="200" cy="204" rx="140" ry="116" fill="#ffb38a"/>`,face(214,50,{angry:true,fang:true}))},
+ {name:'จอมมารราตรี',icon:'😈',color:'#a98be8',hp:7000,time:150,armor:.15,regen:8,startShield:600,healMult:1.3,enrageAt:.3,
+  svg:svgWrap(`
+   <path d="M95 215 Q22 190 14 118 Q48 138 64 112 Q80 150 104 140 Q98 180 120 195Z" fill="#c9b2f5"/>
+   <path d="M305 215 Q378 190 386 118 Q352 138 336 112 Q320 150 296 140 Q302 180 280 195Z" fill="#c9b2f5"/>
+   <path d="M128 292 Q96 352 86 410 L314 410 Q304 352 272 292Z" fill="#a98be8"/>
+   <path d="M150 296 L200 356 L250 296Z" fill="#ffe28a"/><circle cx="200" cy="330" r="12" fill="#ff8fab"/>
+   <ellipse cx="104" cy="352" rx="30" ry="38" fill="#a98be8"/><ellipse cx="296" cy="352" rx="30" ry="38" fill="#a98be8"/>
+   <circle cx="96" cy="384" r="20" fill="#fff4e6"/><circle cx="304" cy="384" r="20" fill="#fff4e6"/>
+   <path d="M118 104 Q92 46 118 16 Q138 62 160 82Z" fill="#ffe28a"/><path d="M282 104 Q308 46 282 16 Q262 62 240 82Z" fill="#ffe28a"/>
+   <ellipse cx="200" cy="200" rx="148" ry="128" fill="#fff4e6"/>
+   <path d="M54 206 Q46 72 200 68 Q354 72 346 206 Q330 160 300 168 Q290 128 262 156 Q238 118 214 152 Q200 124 186 152 Q162 118 138 156 Q110 128 100 168 Q70 160 54 206Z" fill="#6e4f8f"/>
+   <path d="M164 74 L172 38 L190 62 L200 28 L210 62 L228 38 L236 74Z" fill="#ffd34d"/>
+   <circle cx="200" cy="56" r="6" fill="#ff8fab" stroke-width="4"/>`,face(222,44,{angry:true,fang:true}))}
+];
+
+/* =========================== HELPERS =========================== */
+const $=id=>document.getElementById(id);
+const fmt=n=>Math.round(n).toLocaleString('en-US');
+const rand=(a,b)=>a+Math.random()*(b-a);
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const mmss=s=>{s=Math.max(0,Math.ceil(s));return Math.floor(s/60)+':'+String(s%60).padStart(2,'0')};
+const textCache=new WeakMap();
+function setText(el,t){if(textCache.get(el)!==t){textCache.set(el,t);el.textContent=t}}
+function pulse(el,cls,ms=1000){el.classList.remove(cls);void el.offsetWidth;el.classList.add(cls);clearTimeout(el['_t_'+cls]);el['_t_'+cls]=setTimeout(()=>el.classList.remove(cls),ms)}
+
+const el={stage:$('stage'),shake:$('shake'),fx:$('fx'),timer:$('timer'),timerLbl:$('timerLbl'),timerBox:$('timerBox'),
+ hpFill:$('hpFill'),hpGhost:$('hpGhost'),hpText:$('hpText'),hpPct:$('hpPct'),hpWrap:$('hpWrap'),shFill:$('shFill'),shText:$('shText'),
+ chipShield:$('chipShield'),chipStun:$('chipStun'),chipWrath:$('chipWrath'),chipOD:$('chipOD'),chipPassive:$('chipPassive'),
+ boss:$('boss'),bossAct:$('bossAct'),bossSvg:$('bossSvg'),bossTag:$('bossTag'),bossName:$('bossName'),bubble:$('shieldBubble'),heroAct:$('heroAct'),
+ comboFill:$('comboFill'),comboTxt:$('comboTxt'),comboBox:$('comboBox'),roundNum:$('roundNum'),roundSub:$('roundSub'),pips:$('pips'),
+ feed:$('feed'),totH:$('totH'),totB:$('totB'),tugH:$('tugH'),topH:$('topH'),topB:$('topB'),legend:$('legend'),
+ flash:$('flash'),banner:$('banner'),bTitle:$('bTitle'),bSub:$('bSub'),cd:$('cd'),idleBox:$('idleBox'),idleBuf:$('idleBuf'),
+ result:$('result'),resCard:$('resCard'),resTitle:$('resTitle'),resReason:$('resReason'),resStats:$('resStats'),resTopH:$('resTopH'),resTopB:$('resTopB'),resBtn:$('resBtn'),resAuto:$('resAuto'),
+ finale:$('finale'),finTitle:$('finTitle'),finScore:$('finScore'),finRounds:$('finRounds'),finTopH:$('finTopH'),finTopB:$('finTopB'),finStop:$('finStop'),finCancel:$('finCancel'),finRestart:$('finRestart')};
+
+const BOSS_C={x:720,y:840}, HERO_C={x:230,y:1060};
+
+/* =========================== AUDIO (Web Audio API) =========================== */
+const SFX={ctx:null,master:null,nb:null,last:{},vol:CONFIG.volume,
+  init(){ if(this.ctx)return true; const AC=window.AudioContext||window.webkitAudioContext; if(!AC)return false;
+    try{this.ctx=new AC()}catch(e){return false}
+    const c=this.ctx; this.master=c.createGain(); this.master.gain.value=this.vol;
+    const comp=c.createDynamicsCompressor(); comp.threshold.value=-12; comp.ratio.value=6;
+    this.master.connect(comp); comp.connect(c.destination);
+    const len=Math.floor(c.sampleRate*1.6); this.nb=c.createBuffer(1,len,c.sampleRate);
+    const d=this.nb.getChannelData(0); for(let i=0;i<len;i++) d[i]=Math.random()*2-1;
+    return true; },
+  ready(){ if(!this.init())return false; if(this.ctx.state==='suspended') this.ctx.resume(); return true },
+  setVol(v){this.vol=v; if(this.master) this.master.gain.value=v},
+  tone(f,dur,o={}){const c=this.ctx,t=c.currentTime+(o.delay||0);const osc=c.createOscillator(),g=c.createGain();
+    osc.type=o.type||'sine'; osc.frequency.setValueAtTime(f,t); if(o.to) osc.frequency.exponentialRampToValueAtTime(o.to,t+dur);
+    const v=o.vol==null?.3:o.vol; g.gain.setValueAtTime(.0001,t); g.gain.exponentialRampToValueAtTime(v,t+(o.attack||.006)); g.gain.exponentialRampToValueAtTime(.0001,t+dur);
+    osc.connect(g); g.connect(this.master); osc.start(t); osc.stop(t+dur+.05)},
+  noise(dur,o={}){const c=this.ctx,t=c.currentTime+(o.delay||0);const s=c.createBufferSource(); s.buffer=this.nb;
+    const fl=c.createBiquadFilter(); fl.type=o.type||'bandpass'; fl.frequency.setValueAtTime(o.f||1000,t); if(o.to) fl.frequency.exponentialRampToValueAtTime(o.to,t+dur); fl.Q.value=o.q||1;
+    const g=c.createGain(); const v=o.vol==null?.4:o.vol; g.gain.setValueAtTime(v,t); g.gain.exponentialRampToValueAtTime(.0001,t+dur);
+    s.connect(fl); fl.connect(g); g.connect(this.master); s.start(t,Math.random()*.2); s.stop(t+dur+.05)},
+  play(name){ if(!this.ready()||!this.lib[name])return; const gate={slash:55,heal:80,blocked:70,tick:300,shield:90,power:80}[name]||40;
+    const now=performance.now(); if(this.last[name]&&now-this.last[name]<gate)return; this.last[name]=now;
+    try{this.lib[name].call(this)}catch(e){} },
+  lib:{
+    slash(){this.noise(.18,{f:4200,to:600,q:2,vol:.55}); this.tone(1300,.1,{type:'sawtooth',to:280,vol:.12})},
+    power(){this.noise(.32,{f:2600,to:300,q:1.4,vol:.6}); this.tone(240,.38,{type:'square',to:55,vol:.25}); this.tone(900,.15,{type:'triangle',to:1800,vol:.1})},
+    explosion(d=0){this.noise(1.1,{type:'lowpass',f:1800,to:60,q:.7,vol:1,delay:d}); this.tone(120,.9,{to:30,vol:.75,delay:d}); this.noise(.28,{f:3000,to:700,vol:.45,delay:d})},
+    ultimate(){this.tone(180,.5,{type:'sawtooth',to:1700,vol:.18}); this.tone(360,.5,{type:'square',to:2400,vol:.06}); this.lib.explosion.call(this,.42)},
+    combo(){[660,880,1320].forEach((f,i)=>this.tone(f,.12,{type:'square',vol:.12,delay:i*.06})); this.lib.explosion.call(this,.15)},
+    stun(){[1600,1300,1000].forEach((f,i)=>this.tone(f,.08,{type:'square',to:f*.6,vol:.1,delay:i*.08}))},
+    blocked(){this.tone(900,.12,{type:'triangle',to:700,vol:.2}); this.noise(.1,{type:'highpass',f:3000,vol:.25})},
+    shield(){this.tone(280,.42,{type:'triangle',to:1100,vol:.3}); this.tone(1700,.5,{vol:.08,delay:.12}); this.noise(.4,{type:'highpass',f:6000,vol:.12,delay:.05})},
+    shieldBreak(){this.noise(.5,{type:'highpass',f:2500,vol:.5}); [2200,1700,1300].forEach((f,i)=>this.tone(f,.12,{type:'triangle',vol:.12,delay:i*.05}))},
+    heal(){[660,880,1320].forEach((f,i)=>this.tone(f,.18,{vol:.14,delay:i*.06}))},
+    wrath(){this.tone(90,1.1,{type:'sawtooth',to:45,vol:.4}); this.noise(1,{type:'lowpass',f:500,to:120,vol:.5}); [330,440,660,880].forEach((f,i)=>this.tone(f,.22,{type:'triangle',vol:.13,delay:.35+i*.07}))},
+    tick(){this.tone(1000,.06,{type:'square',vol:.12})},
+    count(){this.tone(660,.18,{type:'square',vol:.15})},
+    go(){[523,659,784,1046].forEach(f=>this.tone(f,.5,{type:'sawtooth',vol:.07})); this.noise(.3,{f:2000,vol:.2})},
+    overdrive(){for(let i=0;i<3;i++){this.tone(300,.32,{type:'sawtooth',to:900,vol:.16,delay:i*.34})}},
+    timeup(){this.tone(440,.25,{type:'square',vol:.2}); this.tone(349,.25,{type:'square',vol:.2,delay:.28}); this.tone(262,.7,{type:'square',vol:.22,delay:.56})},
+    win(){[523,659,784,1046,784,1046].forEach((f,i)=>this.tone(f,i>3?.5:.16,{type:'triangle',vol:.22,delay:i*.14}))},
+    lose(){[220,196,175,147].forEach((f,i)=>this.tone(f,.35,{type:'sawtooth',vol:.18,delay:i*.3})); this.noise(1.2,{type:'lowpass',f:300,vol:.4,delay:.2})},
+    finale(){[523,659,784,1046,1318,1046,1318,1568].forEach((f,i)=>this.tone(f,i>5?.7:.18,{type:'triangle',vol:.22,delay:i*.15}))}
+  }
+};
+['pointerdown','keydown','touchstart'].forEach(e=>window.addEventListener(e,()=>SFX.ready(),{passive:true}));
+
+/* =========================== STATE =========================== */
+const C={round:1,results:[],season:{hero:new Map(),boss:new Map()}};   // แคมเปญ 5 รอบ
+const S={phase:'idle',paused:false,buffer:[]};
+const queue=[]; const seenIds=new Set();
+const curBoss=()=>BOSSES[C.round-1];
+
+function passiveText(b){
+  const p=[];
+  if(b.armor) p.push('🪨 เกราะ -'+Math.round(b.armor*100)+'%');
+  if(b.regen) p.push('💗 ฟื้น '+b.regen+'/วิ');
+  if(b.startShield) p.push('🛡 โล่เริ่ม '+b.startShield);
+  if(b.healMult>1) p.push('✨ ฮีล x'+b.healMult);
+  if(b.enrageAt) p.push('💢 คลั่งเมื่อ HP<'+Math.round(b.enrageAt*100)+'%');
+  return p.length?p.join(' · '):'ไม่มีพาสซีฟ (บอสฝึกหัด)';
+}
+function setupBossVisual(){
+  const b=curBoss();
+  el.bossSvg.innerHTML=b.svg;
+  el.bossName.textContent=b.icon+' Lv.'+C.round+' '+b.name;
+  el.bossTag.textContent=b.icon+' ทีมบอส';
+  el.bossTag.style.background=b.color;
+  setText(el.chipPassive.lastElementChild,passiveText(b));
+  setText(el.roundNum,'ROUND '+C.round+'/'+CONFIG.rounds);
+  setText(el.roundSub,'Lv.'+C.round+' '+b.name);
+  renderPips();
+}
+function renderPips(){
+  el.pips.innerHTML=BOSSES.slice(0,CONFIG.rounds).map((b,i)=>{
+    const r=C.results[i]; const cls=r?r:(i===C.round-1&&S.phase!=='finale'?'cur':'');
+    return `<div class="pip ${cls}" title="${esc(b.name)}">${b.icon}</div>`}).join('');
+}
+function resetState(){
+  const b=curBoss(); const hp=Math.round(b.hp*CONFIG.hpScale);
+  Object.assign(S,{hp,maxHP:hp,ghost:hp,shield:b.startShield,shieldT:b.startShield?30:0,stun:0,wrath:0,combo:0,comboIdle:0,
+    timeLeft:Math.round(b.time*CONFIG.timeScale),graceLeft:CONFIG.graceTime,cd:0,overdrive:false,paused:false,lastHit:null,flags:{},autoResetLeft:0,
+    regenAcc:0,regenShow:0,regenT:0,stopLeft:0,
+    contrib:{hero:new Map(),boss:new Map()},totals:{dmg:0,heal:0,shield:0,blocked:0,gifts:0,hero:0,boss:0},leadersDirty:true});
+  queue.length=0;
+  el.stage.classList.remove('overdrive');
+  el.boss.className=''; el.result.classList.remove('on'); el.finale.classList.remove('on');
+  el.feed.innerHTML=''; feedList.length=0; el.fx.innerHTML=''; floatCount=0;
+  setupBossVisual();
+}
+
+/* =========================== PUBLIC API =========================== */
+function normSide(s){s=String(s||'').toLowerCase().trim();
+  if(['hero','h','heroes','attack','atk','left','a','1'].includes(s))return 'hero';
+  if(['boss','b','defend','def','right','villain','2'].includes(s))return 'boss'; return null}
+function normTier(t){if(typeof t==='number')return t>=1&&t<=5?Math.floor(t):null; t=String(t||'').toLowerCase().trim();
+  const m={'1':1,'2':2,'3':3,'4':4,'5':5,'xs':1,'s':2,'small':1,'เล็ก':1,'m':3,'medium':3,'กลาง':3,'l':4,'large':4,'ใหญ่':4,'xl':5,'ultimate':5,'max':5}; return m[t]||null}
+
+function triggerGift(side,tier,senderName,count=1,opts={}){
+  side=normSide(side); tier=normTier(tier);
+  if(!side||!tier){console.warn('[BossRaid] invalid gift',arguments);return false}
+  const sender=(senderName==null||String(senderName).trim()==='')?'ผู้ชม':String(senderName).trim().slice(0,24);
+  count=Math.max(1,Math.min(500,Math.floor(+count||1)));
+  if(opts&&opts.id!=null){const id=String(opts.id); if(seenIds.has(id))return false; seenIds.add(id); if(seenIds.size>5000){const it=seenIds.values(); for(let i=0;i<1000;i++) seenIds.delete(it.next().value)}}
+  const evs=[]; for(let i=0;i<count;i++) evs.push({side,tier,sender});
+  switch(S.phase){
+    case 'idle': case 'countdown':
+      if(S.buffer.length<1000) S.buffer.push(...evs.slice(0,1000-S.buffer.length));
+      feedAdd(side,tier,sender,0,count,'wait');
+      if(S.phase==='idle'&&CONFIG.autoStart) startRound();
+      return true;
+    case 'ended':
+      // ช่วงพักระหว่างรอบ: เก็บไว้ใช้รอบถัดไป (คนดูดีเลย์ยังส่งต่อเนื่อง ไม่เสียของ)
+      if(C.round<CONFIG.rounds&&S.buffer.length<1000){S.buffer.push(...evs.slice(0,1000-S.buffer.length)); feedAdd(side,tier,sender,0,count,'wait'); return true}
+      feedAdd(side,tier,sender,0,count,'late'); return false;
+    case 'playing': case 'grace':
+      queue.push(...evs); return true;
+    default:
+      feedAdd(side,tier,sender,0,count,'late'); return false;
+  }
+}
+window.triggerGift=triggerGift;
+
+/* =========================== GAME FLOW =========================== */
+function startRound(){
+  if(S.phase!=='idle')return;
+  const keep=S.buffer; resetState(); S.buffer=keep;
+  S.phase='countdown'; S.cd=CONFIG.countdown; S._cdShown=0;
+  el.idleBox.classList.remove('on'); renderPips();
+  const b=curBoss(); banner(b.icon+' '+b.name,'ROUND '+C.round+'/'+CONFIG.rounds+' · HP '+fmt(S.maxHP),'boss',3,CONFIG.countdown*1000);
+}
+function goIdle(){ resetState(); S.buffer=[]; S.phase='idle'; el.idleBox.classList.add('on'); el.cd.classList.remove('on'); renderPips() }
+function resetCampaign(){ C.round=1; C.results=[]; C.season.hero.clear(); C.season.boss.clear(); goIdle() }
+function beginFight(){
+  S.phase='playing'; el.cd.classList.remove('on');
+  banner('⚔️ FIGHT!','เลือกฝั่งด้วยของขวัญได้เลย!','gold',3,1800); SFX.play('go');
+  if(S.buffer.length){ floatText('⏳ ของขวัญที่รอไว้ ×'+S.buffer.length+' เข้าแล้ว!','info',540,1300,true); queue.push(...S.buffer); S.buffer=[] }
+  if(CONFIG.overdriveTime>0&&S.timeLeft<=CONFIG.overdriveTime) enterOverdrive();
+}
+function enterOverdrive(){ if(S.overdrive)return; S.overdrive=true; el.stage.classList.add('overdrive');
+  banner('🔥 OVERDRIVE!',Math.round(Math.min(CONFIG.overdriveTime,S.timeLeft))+' วินาทีสุดท้าย · ดาเมจ & ฮีล x2','od',3,2800); SFX.play('overdrive') }
+function enterGrace(){
+  if(CONFIG.graceTime<=0){bossWins();return}
+  S.phase='grace'; S.graceLeft=CONFIG.graceTime;
+  banner('⏰ หมดเวลา!','LAST CALL! ของขวัญที่ส่งทันยังนับอีก '+CONFIG.graceTime+' วิ','gold',3,2400); SFX.play('timeup');
+}
+function heroWins(){
+  if(S.phase==='ending'||S.phase==='ended')return;
+  S.phase='ending'; queue.length=0;
+  el.boss.classList.add('dead'); el.boss.classList.remove('stunned','wrath');
+  S.shield=0; fxBoom(BOSS_C.x,BOSS_C.y,900,''); pulse(el.flash,'go',700); pulse(el.shake,'shake',700); SFX.play('explosion');
+  banner('💀 BOSS DEFEATED!',S.lastHit?('ปิดจ็อบโดย '+S.lastHit):'','hero',4,2200);
+  setTimeout(()=>showResult('hero'),2300);
+}
+function bossWins(){
+  if(S.phase==='ending'||S.phase==='ended')return;
+  S.phase='ending'; queue.length=0;
+  pulse(el.bossAct,'b-roar',1000); el.flash.classList.add('red'); pulse(el.flash,'go',700); setTimeout(()=>el.flash.classList.remove('red'),800);
+  banner('😈 บอสรอดแล้ว!','หมดเวลา — บอสยังไม่ตาย','boss',4,1900); SFX.play('lose');
+  setTimeout(()=>showResult('boss'),2000);
+}
+function topArr(map,n){return [...map.entries()].sort((a,b)=>b[1].pts-a[1].pts).slice(0,n)}
+function listHTML(map,n){
+  const arr=topArr(map,n);
+  if(!arr.length) return '<li class="empty">— ยังไม่มีผู้ส่ง —</li>';
+  const medal=['🥇','🥈','🥉','4.','5.'];
+  return arr.map(([nm,v],i)=>`<li><span>${medal[i]||(i+1)+'.'} ${esc(nm)}</span><b>${fmt(v.pts)}</b></li>`).join('');
+}
+function showResult(win){
+  S.phase='ended'; C.results[C.round-1]=win; renderPips();
+  const t=S.totals, b=curBoss(), last=C.round>=CONFIG.rounds;
+  el.resCard.className='box '+win;
+  el.resTitle.textContent= win==='hero'?'🏆 ฝั่งฮีโร่ชนะ!':'😈 ฝั่งบอสชนะ!';
+  el.resReason.textContent= `ROUND ${C.round}/${CONFIG.rounds} · ${b.icon} ${b.name} — `+(win==='hero'
+    ? `โค่นได้ก่อนหมดเวลา (เหลือ ${mmss(S.timeLeft)})${S.lastHit?' · Last Hit: '+S.lastHit:''}`
+    : `หมดเวลา! บอสเหลือ HP ${fmt(S.hp)} (${Math.ceil(S.hp/S.maxHP*100)}%)`);
+  el.resStats.innerHTML=[
+    ['⚔️ ดาเมจรวม',fmt(t.dmg)],['💚 ฮีลรวม',fmt(t.heal)],['🛡 โล่รวม',fmt(t.shield)],
+    ['🧱 โล่กันไว้',fmt(t.blocked)],['🎁 ของขวัญ',fmt(t.gifts)],['🏁 สกอร์รวม',C.results.filter(r=>r==='hero').length+' : '+C.results.filter(r=>r==='boss').length]
+  ].map(([a,v])=>`<div class="st"><b>${v}</b><span>${a}</span></div>`).join('');
+  el.resTopH.innerHTML=listHTML(S.contrib.hero,5); el.resTopB.innerHTML=listHTML(S.contrib.boss,5);
+  if(last){ el.resBtn.textContent='🎉 ดูสรุปจบไลฟ์'; S.autoResetLeft=CONFIG.finaleDelay }
+  else { const nb=BOSSES[C.round]; el.resBtn.textContent='▶ รอบถัดไป: '+nb.icon+' '+nb.name; S.autoResetLeft=CONFIG.nextDelay }
+  el.resAuto.textContent='';
+  el.result.classList.add('on'); SFX.play('win');
+}
+function nextStep(){
+  if(S.phase!=='ended')return;
+  el.result.classList.remove('on');
+  if(C.round>=CONFIG.rounds){ showFinale(); return }
+  const keep=S.buffer; C.round++; S.phase='idle'; S.buffer=keep; startRound();
+}
+function showFinale(){
+  S.phase='finale'; el.result.classList.remove('on'); renderPips();
+  const hw=C.results.filter(r=>r==='hero').length, bw=C.results.filter(r=>r==='boss').length;
+  el.finTitle.textContent= hw>bw?'🏆 ทีมฮีโร่ครองไลฟ์!':hw<bw?'😈 ทีมบอสครองไลฟ์!':'🤝 เสมอกันสุดมันส์!';
+  el.finScore.textContent='⚔️ '+hw+' : '+bw+' 😈';
+  el.finRounds.innerHTML=BOSSES.slice(0,CONFIG.rounds).map((b,i)=>{const r=C.results[i];
+    return `<div class="fr ${r||''}"><span>R${i+1} ${b.icon} ${esc(b.name)}</span><b>${r==='hero'?'⚔️ ฮีโร่ชนะ':r==='boss'?'😈 บอสชนะ':'—'}</b></div>`}).join('');
+  el.finTopH.innerHTML=listHTML(C.season.hero,5); el.finTopB.innerHTML=listHTML(C.season.boss,5);
+  el.finale.classList.add('on'); SFX.play('finale');
+  S.stopLeft=CONFIG.autoStop?CONFIG.stopDelay:0;
+  el.finStop.textContent=CONFIG.autoStop?'':'📴 ถึงเวลาลงไลฟ์แล้ว — กดจบไลฟ์ได้เลย';
+  el.finCancel.style.display=CONFIG.autoStop?'':'none';
+  const detail={heroWins:hw,bossWins:bw,results:C.results.slice(),mvpHero:topArr(C.season.hero,5),mvpBoss:topArr(C.season.boss,5)};
+  window.dispatchEvent(new CustomEvent('bossraid:finale',{detail}));
+  try{ if(window.parent!==window) window.parent.postMessage({type:'bossraid-finale',detail},'*') }catch(e){}
+}
+function cancelAutoStop(){ if(S.phase!=='finale'||S.stopLeft<=0)return; S.stopLeft=0; el.finStop.textContent='✋ ยกเลิกลงไลฟ์อัตโนมัติแล้ว'; el.finCancel.style.display='none' }
+function stopStream(){
+  el.finCancel.style.display='none';
+  const o=window.obsstudio;
+  const manual=msg=>el.finStop.textContent=msg||'📴 ถึงเวลาลงไลฟ์แล้ว — กดจบไลฟ์ในแอปได้เลย 💖';
+  if(!o||typeof o.stopStreaming!=='function'){manual();return}
+  const doStop=()=>{try{o.stopStreaming(); el.finStop.textContent='📴 สั่ง OBS หยุดสตรีมแล้ว — บ๊ายบาย! 👋'}catch(e){manual()}};
+  if(typeof o.getControlLevel==='function'){
+    try{o.getControlLevel(lv=>{ if(lv>=5) doStop(); else manual('⚠️ OBS ยังไม่ให้สิทธิ์ (Page permissions → Full access) — กดจบไลฟ์เองนะ') })}catch(e){doStop()}
+  } else doStop();
+}
+
+/* =========================== GIFT EFFECTS =========================== */
+function addContrib(side,name,pts){ if(pts<=0)return;
+  for(const m of [S.contrib[side],C.season[side]]){ const v=m.get(name)||{pts:0,n:0}; v.pts+=pts; v.n++; m.set(name,v) }
+  S.totals[side]+=pts; S.leadersDirty=true }
+function nearBoss(){return {x:BOSS_C.x+rand(-170,170),y:BOSS_C.y+rand(-150,80)}}
+
+function dealDamage(amount,sender,pierce,cls){
+  let toHP=amount, absorbed=0;
+  if(!pierce&&S.shield>0){
+    absorbed=Math.min(S.shield,amount); S.shield-=absorbed; toHP-=absorbed; S.totals.blocked+=absorbed;
+    const p=nearBoss(); floatText('🛡-'+fmt(absorbed),'blocked',p.x,p.y-60); pulse(el.bubble,'ding',250); SFX.play('blocked');
+    if(S.shield<=0){S.shield=0; floatText('💥 โล่แตก!','shield',BOSS_C.x,BOSS_C.y-200,true); SFX.play('shieldBreak')}
+  }
+  const before=S.hp;
+  if(toHP>0){ S.hp=Math.max(0,S.hp-toHP); const p=nearBoss(); floatText('-'+fmt(toHP),cls,p.x,p.y,cls==='crit'); pulse(el.bossAct,'b-hit',380) }
+  const applied=absorbed+(before-S.hp);
+  S.totals.dmg+=applied; addContrib('hero',sender,applied);
+  if(S.hp<=0){S.lastHit=sender; heroWins(); return}
+  const b=curBoss(), r=S.hp/S.maxHP;
+  if(b.enrageAt&&!S.flags.enrage&&r<=b.enrageAt){
+    S.flags.enrage=true; S.stun=0; el.boss.classList.remove('stunned');
+    S.wrath=CONFIG.wrathDuration; el.boss.classList.add('wrath'); pulse(el.bossAct,'b-roar',950);
+    banner('💢 บอสคลั่ง!','HP ต่ำกว่า '+Math.round(b.enrageAt*100)+'% — บัฟ x'+CONFIG.wrathMult+' อัตโนมัติ!','boss',2,2200); SFX.play('wrath');
+  } else if(!S.flags.low&&r<=.25){S.flags.low=true; banner('💀 บอสใกล้ตาย!','HP ต่ำกว่า 25% — ทีมบอสรีบฮีล!','hero',1,2000)}
+}
+function healBoss(h,sender,big){
+  if(h<=0)return; S.hp=Math.min(S.maxHP,S.hp+h); if(S.ghost<S.hp)S.ghost=S.hp;
+  const p=nearBoss(); floatText('+'+fmt(h),big?'bigheal':'heal',p.x,p.y,big);
+  pulse(el.bossAct,'b-heal',700); pulse(el.hpWrap,'healflash',400); fxHeal(big?12:5);
+  S.totals.heal+=h; addContrib('boss',sender,h);
+}
+function addShield(v,sender){
+  S.shield=Math.min(CONFIG.maxShield,S.shield+v); S.shieldT=Math.max(S.shieldT,CONFIG.shieldDuration);
+  floatText('🛡+'+fmt(v),'shield',BOSS_C.x+rand(-120,120),BOSS_C.y-120); pulse(el.bubble,'pop',450);
+  S.totals.shield+=v; addContrib('boss',sender,v);
+}
+function addCombo(sender,mult){
+  S.combo+=CONFIG.combo.perHit; S.comboIdle=0;
+  if(S.combo>=CONFIG.combo.max){
+    S.combo=0; const d=Math.round(CONFIG.combo.burstDmg*mult);
+    floatText('⚡ COMBO BURST!','combo',BOSS_C.x-60,BOSS_C.y+260,true);
+    fxBoom(BOSS_C.x,BOSS_C.y,500,'blue'); SFX.play('combo'); pulse(el.shake,'shakeS',380);
+    dealDamage(d,sender,false,'big');
+  }
+}
+const live=()=>S.phase==='playing'||S.phase==='grace';
+
+function stunBoss(sec){ if(!live())return; if(S.stun<=0){floatText('💫 STUN!','stun',BOSS_C.x,BOSS_C.y-280); SFX.play('stun')} S.stun=Math.max(S.stun,sec); el.boss.classList.add('stunned') }
+function cleanseStun(){ if(S.stun>0){S.stun=0; el.boss.classList.remove('stunned'); floatText('✨ ล้างสตั๊น!','heal',BOSS_C.x,BOSS_C.y-280)} }
+function applyGift(ev){
+  if(!live())return;
+  const {side,tier,sender}=ev; const g=CONFIG.gifts[side][tier]; const od=S.overdrive?CONFIG.overdriveMult:1; const b=curBoss();
+  S.totals.gifts++;
+  if(side==='hero'){
+    const mult=od*(S.stun>0?CONFIG.stunVuln:1)*(1-b.armor);
+    const bonus=1+(S.combo/CONFIG.combo.max)*CONFIG.combo.maxBonus;
+    switch(g.key){
+      case 'slash':{
+        const d=Math.round(g.value*mult*bonus);
+        pulse(el.heroAct,'a-atk',360); fxSlash(); SFX.play('slash'); feedAdd(side,tier,sender,d,1);
+        dealDamage(d,sender,false,'dmg'); if(live()) addCombo(sender,mult); break}
+      case 'double':{
+        const d=Math.round(g.value*mult*bonus);
+        pulse(el.heroAct,'a-atk',360); fxSlash(); SFX.play('slash'); feedAdd(side,tier,sender,d*2,1);
+        dealDamage(d,sender,false,'big');
+        setTimeout(()=>{ if(!live())return; fxSlash(); SFX.last.slash=0; SFX.play('slash'); dealDamage(d,sender,false,'big'); if(live()){addCombo(sender,mult); addCombo(sender,mult)} },180);
+        break}
+      case 'power':{
+        const d=Math.round(g.value*mult);
+        pulse(el.heroAct,'a-pow',620); fxSlash(); fxBoom(BOSS_C.x,BOSS_C.y,420,'blue'); SFX.play('power'); pulse(el.shake,'shakeS',380);
+        feedAdd(side,tier,sender,d,1); dealDamage(d,sender,false,'big'); stunBoss(CONFIG.stunDuration); break}
+      case 'thunder':{
+        const d=Math.round(g.value*mult);
+        pulse(el.heroAct,'a-pow',620); fxBoom(BOSS_C.x,BOSS_C.y,700,'blue'); pulse(el.flash,'go',500); pulse(el.shake,'shake',600);
+        SFX.play('power'); SFX.play('explosion');
+        if(S.shield>0){ const s=S.shield; S.shield=0; S.totals.blocked+=0; floatText('⚡ ทำลายโล่ '+fmt(s)+'!','shield',BOSS_C.x,BOSS_C.y-200,true); SFX.play('shieldBreak'); addContrib('hero',sender,Math.round(s*.5)) }
+        banner('⚡ THUNDER BREAK!',sender+' ทำลายโล่ + ดาเมจ -'+fmt(d),'hero',2,1800);
+        feedAdd(side,tier,sender,d,1); dealDamage(d,sender,true,'crit'); break}
+      case 'ult':{
+        const d=Math.round(g.value*mult);
+        pulse(el.heroAct,'a-ult',1000); fxBeam();
+        setTimeout(()=>{fxBoom(BOSS_C.x,BOSS_C.y,900,''); pulse(el.flash,'go',650); pulse(el.shake,'shake',700)},380);
+        SFX.play('ultimate'); banner('🌟 ULTIMATE!',sender+' ปล่อยท่าไม้ตาย -'+fmt(d),'hero',3,2200);
+        feedAdd(side,tier,sender,d,1); dealDamage(d,sender,true,'crit'); stunBoss(3); break}
+    }
+  }else{
+    const wr=S.wrath>0?CONFIG.wrathMult:1, st=S.stun>0?CONFIG.stunHealPenalty:1, hm=b.healMult, m=od*wr*hm;
+    switch(g.key){
+      case 'heal':{ const h=Math.round(g.value*m*st); healBoss(h,sender,false); SFX.play('heal'); feedAdd(side,tier,sender,h,1); break}
+      case 'mend':{ cleanseStun(); const h=Math.round(g.value*m); healBoss(h,sender,false); SFX.last.heal=0; SFX.play('heal'); feedAdd(side,tier,sender,h,1); break}
+      case 'shield':{ const v=Math.round(g.value*m*st); addShield(v,sender); SFX.play('shield'); feedAdd(side,tier,sender,v,1); break}
+      case 'fort':{ const v=Math.round(g.value*m*st), h=Math.round(300*m*st); addShield(v,sender); healBoss(h,sender,true);
+        SFX.play('shield'); SFX.play('heal'); banner('🏰 FORTRESS!',sender+' โล่ +'+fmt(v)+' · ฮีล +'+fmt(h),'boss',2,1800); feedAdd(side,tier,sender,v+h,1); break}
+      case 'wrath':{
+        cleanseStun();
+        const h=Math.round(g.value*m); healBoss(h,sender,true);
+        S.wrath=CONFIG.wrathDuration; el.boss.classList.add('wrath');
+        pulse(el.bossAct,'b-roar',950); fxBoom(BOSS_C.x,BOSS_C.y,900,'red'); pulse(el.shake,'shakeS',380);
+        SFX.play('wrath'); banner('😡 BOSS WRATH!',sender+' ฮีล +'+fmt(h)+' · บัฟ x'+CONFIG.wrathMult+' '+CONFIG.wrathDuration+' วิ','boss',3,2200);
+        feedAdd(side,tier,sender,h,1); break}
+    }
+  }
+}
+
+setInterval(()=>{
+  if(S.paused||!live()||!queue.length)return;
+  const n=Math.max(1,Math.ceil(queue.length/12));
+  for(let i=0;i<n&&queue.length;i++){ applyGift(queue.shift()); if(!live())break }
+},70);
+
+/* =========================== FX =========================== */
+let floatCount=0;
+function floatText(txt,cls,x,y,important){
+  if(floatCount>36&&!important)return;
+  const d=document.createElement('div'); d.className='float '+cls; d.textContent=txt;
+  d.style.left=x+'px'; d.style.top=y+'px'; d.style.setProperty('--dx',rand(-60,60).toFixed(0)+'px');
+  el.fx.appendChild(d); floatCount++;
+  const kill=()=>{if(d.parentNode){d.remove();floatCount--}}; d.addEventListener('animationend',kill); setTimeout(kill,2500);
+}
+function spawn(cls,styles,html,ms){ if(el.fx.childElementCount>80)return null; const d=document.createElement('div'); d.className=cls; Object.assign(d.style,styles); if(html)d.innerHTML=html; el.fx.appendChild(d); setTimeout(()=>d.remove(),ms); return d }
+const SLASH_SVG='<svg viewBox="0 0 200 200" width="100%" height="100%"><path d="M20 150 Q90 20 185 40 Q100 50 30 165Z" fill="#fff" opacity=".95"/><path d="M28 158 Q95 45 175 46" stroke="#7dd3fc" stroke-width="5" fill="none"/></svg>';
+function fxSlash(){ const p=nearBoss(); const d=spawn('slash',{left:p.x+'px',top:p.y+'px'},SLASH_SVG,450); if(d) d.style.setProperty('--r',rand(-60,60).toFixed(0)+'deg') }
+function fxBoom(x,y,size,variant){ spawn('boom '+(variant||''),{left:x+'px',top:y+'px',width:size+'px',height:size+'px'},'',950) }
+function fxBeam(){ const dx=BOSS_C.x-HERO_C.x-40,dy=BOSS_C.y-HERO_C.y+120; const len=Math.hypot(dx,dy); const a=Math.atan2(dy,dx)*180/Math.PI;
+  const d=spawn('beam',{left:(HERO_C.x+40)+'px',top:(HERO_C.y-120-45)+'px',width:len+'px'},'',800); if(d)d.style.setProperty('--a',a.toFixed(1)+'deg') }
+function fxHeal(n){ for(let i=0;i<n;i++) spawn('pt',{left:(BOSS_C.x+rand(-220,200))+'px',top:(BOSS_C.y+rand(-40,200))+'px',animationDelay:(i*.06)+'s'},'✚',1500) }
+
+let bannerPrio=0,bannerUntil=0,bannerTimer=0;
+function banner(title,sub,theme,prio=1,ms=2200){
+  const now=performance.now(); if(prio<bannerPrio&&now<bannerUntil)return;
+  bannerPrio=prio; bannerUntil=now+ms;
+  el.bTitle.textContent=title; el.bSub.textContent=sub||'';
+  el.banner.className=''; void el.banner.offsetWidth; el.banner.style.setProperty('--dur',ms+'ms'); el.banner.className='show '+(theme||'');
+  clearTimeout(bannerTimer); bannerTimer=setTimeout(()=>{el.banner.className='';bannerPrio=0},ms);
+}
+
+const feedList=[];
+function feedAdd(side,tier,sender,amount,count,mode){
+  const now=performance.now(); const top=feedList[0];
+  if(top&&top.side===side&&top.tier===tier&&top.sender===sender&&top.mode===mode&&now-top.t<4500){
+    top.n+=count; top.total+=amount; top.t=now; renderFeedItem(top); pulse(top.el,'bump',260); return }
+  const d=document.createElement('div'); d.className='fi '+side+(mode==='late'?' late':'');
+  const it={side,tier,sender,n:count,total:amount,t:now,mode,el:d}; feedList.unshift(it); renderFeedItem(it);
+  el.feed.prepend(d); while(feedList.length>4){const o=feedList.pop(); o.el.remove()}
+}
+function renderFeedItem(it){
+  const g=CONFIG.gifts[it.side][it.tier];
+  const sign=it.side==='hero'?'-':'+';
+  const val= it.mode==='wait'?'⏳ รอเริ่มรอบ': it.mode==='late'?'มาช้า (จบแล้ว)': sign+fmt(it.total);
+  it.el.innerHTML=`<div class="ic">${g.icon}</div><div><div class="nm">${esc(it.sender)}</div><div class="ac">${esc(g.name)} ${it.n>1?'<span class="x">×'+it.n+'</span>':''} · ${val}</div></div>`;
+}
+
+function buildLegend(){
+  if(!CONFIG.showLegend){el.legend.style.display='none';return}
+  let h='';
+  for(const side of ['hero','boss']) for(const t of [1,2,3,4,5]){ const g=CONFIG.gifts[side][t];
+    h+=`<div class="lg ${side}"><div class="gi">${g.icon}</div><div class="gx"><div class="gt"><b>${g.coin}🪙</b> ${esc(g.th)} → ${esc(g.name)}</div><div class="gd">${esc(g.desc)}</div></div></div>` }
+  el.legend.innerHTML=h;
+}
+
+/* =========================== LOOP =========================== */
+let lastT=performance.now(), leadersT=0;
+function update(dt){
+  if(S.phase==='countdown'){
+    const n=Math.ceil(S.cd);
+    if(n!==S._cdShown&&n>0){S._cdShown=n; el.cd.textContent=n; el.cd.classList.add('on'); pulse(el.cd,'tick',900); SFX.play('count')}
+    S.cd-=dt; if(S.cd<=0) beginFight();
+    return;
+  }
+  if(S.phase==='ended'&&S.autoResetLeft>0){
+    S.autoResetLeft-=dt;
+    setText(el.resAuto,(C.round>=CONFIG.rounds?'สรุปจบไลฟ์ใน ':'รอบถัดไปเริ่มใน ')+Math.ceil(S.autoResetLeft)+' วิ'+(S.buffer.length?' · 🎁 ของขวัญรอ '+S.buffer.length:''));
+    if(S.autoResetLeft<=0) nextStep();
+    return;
+  }
+  if(S.phase==='finale'){
+    if(S.stopLeft>0){ S.stopLeft-=dt; setText(el.finStop,'📴 ลงไลฟ์อัตโนมัติใน '+Math.ceil(S.stopLeft)+' วิ'); if(S.stopLeft<=0){S.stopLeft=0; stopStream()} }
+    return;
+  }
+  if(S.paused)return;
+  if(live()){
+    const b=curBoss();
+    if(S.stun>0){S.stun-=dt; if(S.stun<=0){S.stun=0; el.boss.classList.remove('stunned')}}
+    if(S.wrath>0){S.wrath-=dt; if(S.wrath<=0){S.wrath=0; el.boss.classList.remove('wrath'); floatText('บัฟบอสหมดแล้ว','info',BOSS_C.x,BOSS_C.y-260)}}
+    if(S.shield>0){S.shieldT-=dt; if(S.shieldT<=0){S.shield=0; floatText('🛡 โล่หมดเวลา','blocked',BOSS_C.x,BOSS_C.y-200); SFX.play('shieldBreak')}}
+    S.comboIdle+=dt; if(S.comboIdle>CONFIG.combo.idleDelay&&S.combo>0) S.combo=Math.max(0,S.combo-CONFIG.combo.decayPerSec*dt);
+    // พาสซีฟฟื้นฟู (หยุดระหว่างโดนสตั๊น)
+    if(b.regen&&S.stun<=0&&S.hp>0&&S.hp<S.maxHP){
+      S.regenAcc+=b.regen*CONFIG.hpScale*dt; const w=Math.floor(S.regenAcc);
+      if(w>0){S.regenAcc-=w; S.hp=Math.min(S.maxHP,S.hp+w); S.regenShow+=w}
+      S.regenT+=dt; if(S.regenT>=2){S.regenT=0; if(S.regenShow>0){floatText('💗+'+S.regenShow,'heal',BOSS_C.x+150,BOSS_C.y+60); S.regenShow=0}}
+    }
+  }
+  if(S.phase==='playing'){
+    const prev=S.timeLeft; S.timeLeft-=dt; const T=S.timeLeft, f=S.flags, od=CONFIG.overdriveTime, full=curBoss().time*CONFIG.timeScale;
+    if(!f.m60&&full>75&&T<=60){f.m60=true; banner('⏳ เหลือ 60 วินาที!','','gold',1,1800)}
+    if(od>0&&!f.odWarn&&T<=od+10&&full>od+12){f.odWarn=true; banner('⚠️ OVERDRIVE ใน 10 วิ!','เตรียมของขวัญ — ดาเมจ & ฮีล x2','od',2,2400)}
+    if(od>0&&!S.overdrive&&T<=od) enterOverdrive();
+    if(T<=10&&T>0&&Math.ceil(T)!==Math.ceil(prev)) SFX.play('tick');
+    if(T<=0){S.timeLeft=0; enterGrace()}
+  }else if(S.phase==='grace'){
+    const prev=S.graceLeft; S.graceLeft-=dt; if(Math.ceil(S.graceLeft)!==Math.ceil(prev)) SFX.play('tick');
+    if(S.graceLeft<=0) bossWins();
+  }
+  if(S.ghost>S.hp){ S.ghost=Math.max(S.hp,S.ghost-Math.max(S.maxHP*.35*dt,(S.ghost-S.hp)*2.5*dt)) } else S.ghost=S.hp;
+}
+function render(now){
+  const hpP=S.hp/S.maxHP*100;
+  el.hpFill.style.width=hpP+'%'; el.hpGhost.style.width=(S.ghost/S.maxHP*100)+'%';
+  setText(el.hpText,fmt(Math.ceil(S.hp))+' / '+fmt(S.maxHP)); setText(el.hpPct,Math.ceil(hpP)+'%');
+  el.shFill.style.width=Math.min(100,S.shield/CONFIG.maxShield*100)+'%';
+  setText(el.shText,S.shield>0?`🛡 โล่ ${fmt(S.shield)} / ${fmt(CONFIG.maxShield)} · ${Math.ceil(S.shieldT)} วิ`:'🛡 ไม่มีโล่');
+  el.bubble.style.opacity=S.shield>0?(.4+.6*Math.min(1,S.shield/CONFIG.maxShield*1.6)).toFixed(2):'0';
+  const on=(c,b)=>c.classList.toggle('on',!!b);
+  on(el.chipShield,S.shield>0); if(S.shield>0) setText(el.chipShield.lastElementChild,Math.ceil(S.shieldT)+'s');
+  on(el.chipStun,S.stun>0); if(S.stun>0) setText(el.chipStun.lastElementChild,Math.ceil(S.stun)+'s');
+  on(el.chipWrath,S.wrath>0); if(S.wrath>0) setText(el.chipWrath.lastElementChild,Math.ceil(S.wrath)+'s');
+  on(el.chipOD,S.overdrive);
+  const tb=el.timerBox;
+  let lbl='เวลาที่เหลือ', tv=mmss(S.timeLeft);
+  if(S.phase==='idle'){lbl='รอเริ่มรอบ'} else if(S.phase==='countdown'){lbl='เตรียมตัว!'}
+  else if(S.phase==='grace'){lbl='⏰ LAST CALL'; tv='+'+Math.ceil(S.graceLeft)}
+  else if(S.phase==='ending'||S.phase==='ended'){lbl='จบรอบ'}
+  else if(S.phase==='finale'){lbl='จบไลฟ์'; tv='GG!'}
+  if(S.paused) lbl='⏸ หยุดชั่วคราว';
+  else if(S.phase==='playing'&&S.overdrive) lbl='🔥 OVERDRIVE x2';
+  setText(el.timerLbl,lbl); setText(el.timer,tv);
+  tb.classList.toggle('warn',S.phase==='playing'&&S.timeLeft<=10);
+  tb.classList.toggle('od',S.overdrive&&S.phase==='playing');
+  tb.classList.toggle('grace',S.phase==='grace');
+  const cp=Math.min(100,S.combo/CONFIG.combo.max*100);
+  el.comboFill.style.width=cp+'%'; setText(el.comboTxt,Math.floor(cp)+'% · ดาเมจ +'+Math.round(cp/100*CONFIG.combo.maxBonus*100)+'%');
+  el.comboBox.classList.toggle('full',cp>=80);
+  if(S.phase==='idle') setText(el.idleBuf,(curBoss().icon+' ROUND '+C.round+'/'+CONFIG.rounds+': '+curBoss().name)+(S.buffer.length?(' · 🎁 รอเข้า '+S.buffer.length+' ชิ้น'):''));
+  if(S.leadersDirty&&now-leadersT>400){
+    leadersT=now; S.leadersDirty=false;
+    setText(el.totH,fmt(S.totals.hero)); setText(el.totB,fmt(S.totals.boss));
+    const sum=S.totals.hero+S.totals.boss; el.tugH.style.width=(sum?S.totals.hero/sum*100:50)+'%';
+    el.topH.innerHTML=listHTML(S.contrib.hero,3); el.topB.innerHTML=listHTML(S.contrib.boss,3);
+  }
+}
+function frame(now){ const dt=Math.min(1,(now-lastT)/1000); lastT=now; update(dt); render(now); requestAnimationFrame(frame) }
+
+function fit(){ const s=Math.min(innerWidth/1080,innerHeight/1920); el.stage.style.transform=`translate(-50%,-50%) scale(${s})` }
+window.addEventListener('resize',fit);
+
+/* =========================== TEST PANEL =========================== */
+const NAMES=['น้องมะลิ','KenjiX','ป้าแดง','Mook_99','ไข่เจียว','FahSai','Beam.bkk','NongPun','ลุงหมี','Aom_Za','DarkLord','ส้มตำปู','Ploy','JayJay','ต้นกล้า','MaxPower','หมูกรอบ','Nina☆'];
+const panel=$('panel');
+let pendingDelay=0;
+function initPanel(){
+  if(!CONFIG.showPanel) panel.classList.add('hidden');
+  try{ if(localStorage.getItem('bossraid_collapsed')==='1') panel.classList.add('collapsed') }catch(e){}
+  const setArrow=()=>$('pArrow').textContent=panel.classList.contains('collapsed')?'▸':'▾'; setArrow();
+  $('pHead').onclick=()=>{panel.classList.toggle('collapsed'); setArrow(); try{localStorage.setItem('bossraid_collapsed',panel.classList.contains('collapsed')?'1':'0')}catch(e){}};
+  for(const side of ['hero','boss']){ const box=side==='hero'?$('pHero'):$('pBoss');
+    for(const t of [1,2,3,4,5]){ const g=CONFIG.gifts[side][t]; const b=document.createElement('button');
+      b.textContent=`${g.icon} ${g.th} ${g.coin}🪙 · ${g.name}`; b.onclick=()=>testGift(side,t); box.appendChild(b) } }
+  panel.querySelectorAll('[data-act]').forEach(b=>b.onclick=()=>action(b.dataset.act));
+  const vol=$('pVol'); vol.value=CONFIG.volume; vol.oninput=()=>SFX.setVol(+vol.value);
+  $('pAuto').onchange=e=>{ if(e.target.checked) autoSim() };
+  setInterval(()=>{ setText($('pStat'),`รอบ ${C.round}/${CONFIG.rounds} · สถานะ: ${S.phase}${S.paused?' (พัก)':''} · คิว ${queue.length} · รอเริ่ม ${S.buffer.length} · ดีเลย์ค้าง ${pendingDelay}`) },300);
+}
+function testGift(side,tier,name){
+  const nm=name||$('pName').value.trim()||NAMES[Math.floor(Math.random()*NAMES.length)];
+  const cnt=+$('pCount').value||1;
+  if($('pDelay').checked){ pendingDelay++; setTimeout(()=>{pendingDelay--; triggerGift(side,tier,nm,cnt)},rand(3000,8000)) }
+  else triggerGift(side,tier,nm,cnt);
+}
+function autoSim(){
+  if(!$('pAuto').checked)return;
+  if(live()){
+    const side=Math.random()<.55?'hero':'boss'; const r=Math.random(); const tier=r<.6?1:r<.78?2:r<.9?3:r<.97?4:5;
+    const nm=NAMES[Math.floor(Math.random()*NAMES.length)];
+    const c=tier===1&&Math.random()<.35?Math.ceil(rand(2,8)):1;
+    if($('pDelay').checked){pendingDelay++; setTimeout(()=>{pendingDelay--; triggerGift(side,tier,nm,c)},rand(3000,8000))} else triggerGift(side,tier,nm,c);
+  }
+  setTimeout(autoSim,rand(200,700));
+}
+function action(a){
+  SFX.ready();
+  if(a==='start'){ if(S.phase==='idle') startRound(); else if(S.phase==='ended') nextStep(); else if(S.paused) S.paused=false }
+  else if(a==='pause'){ if(live()) S.paused=!S.paused }
+  else if(a==='skip'){ if(S.phase==='playing') S.timeLeft=Math.max(.5,S.timeLeft-30) }
+  else if(a==='reset'){ if(S.phase!=='finale') goIdle() }
+  else if(a==='next'){ if(S.phase==='ended') nextStep(); else if(S.phase==='idle'&&C.round<CONFIG.rounds){C.round++; goIdle()} }
+  else if(a==='all'){ resetCampaign() }
+}
+el.resBtn.onclick=()=>{SFX.ready(); nextStep()};
+el.finCancel.onclick=cancelAutoStop;
+el.finRestart.onclick=()=>{SFX.ready(); resetCampaign()};
+window.addEventListener('keydown',e=>{
+  if(e.target&&(e.target.tagName==='INPUT'||e.target.tagName==='SELECT'))return;
+  const k=e.key.toLowerCase();
+  if(k>='1'&&k<='5') testGift('hero',+k);
+  else if(k>='6'&&k<='9') testGift('boss',+k-5);
+  else if(k==='0') testGift('boss',5);
+  else if(k===' '){e.preventDefault(); action('start')}
+  else if(k==='p') action('pause');
+  else if(k==='r') action('reset');
+  else if(k==='c') cancelAutoStop();
+  else if(k==='h') panel.classList.toggle('hidden');
+});
+
+/* =========================== EXTERNAL BRIDGES =========================== */
+function handleExternal(d){
+  if(!d)return; if(Array.isArray(d))return d.forEach(handleExternal);
+  if(typeof d==='string'){try{d=JSON.parse(d)}catch(e){return}}
+  const type=String(d.type||'gift').toLowerCase();
+  if(type==='start')return action('start'); if(type==='reset')return goIdle(); if(type==='pause')return action('pause');
+  if(type==='next')return action('next'); if(type==='resetall')return resetCampaign(); if(type==='cancelstop')return cancelAutoStop();
+  if(type==='gift') triggerGift(d.side,d.tier,d.sender||d.name||d.user||d.nickname,d.count||d.repeat||d.repeatCount||1,{id:d.id});
+}
+window.addEventListener('message',e=>{ const d=e.data; if(d&&typeof d==='object'&&d.type==='bossraid-finale')return; if(d&&(typeof d==='object'||typeof d==='string')) handleExternal(d) });
+function connectWS(){ if(!CONFIG.wsUrl)return; let ws; try{ws=new WebSocket(CONFIG.wsUrl)}catch(e){return}
+  ws.onmessage=e=>handleExternal(e.data); ws.onclose=()=>setTimeout(connectWS,3000); ws.onerror=()=>{try{ws.close()}catch(e){}} }
+
+window.BossRaid={start:()=>action('start'),reset:goIdle,resetAll:resetCampaign,next:nextStep,pause:()=>action('pause'),cancelAutoStop,config:CONFIG,bosses:BOSSES,
+  getState:()=>({phase:S.phase,round:C.round,results:C.results.slice(),hp:S.hp,maxHP:S.maxHP,shield:S.shield,stun:S.stun,wrath:S.wrath,overdrive:S.overdrive,timeLeft:S.timeLeft,queue:queue.length,
+    topHero:topArr(S.contrib.hero,5),topBoss:topArr(S.contrib.boss,5)})};
+
+/* =========================== INIT =========================== */
+buildLegend(); initPanel(); fit(); goIdle(); SFX.init(); connectWS();
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
